@@ -71,6 +71,7 @@ Notes on the config:
 | **R** | Lock nearest target to the nose |
 | **Tab** | Cycle targets · **T** drop lock |
 | **Space** | Deploy flares |
+| **C** | Toggle cockpit / chase view |
 | **P** / **Esc** | Pause |
 
 ### How the mouse works
@@ -90,7 +91,7 @@ Response is graded and stable across the range: a 2px/frame drag settles at 9° 
 |---|---|---|
 | **Z** | Split-S | Roll inverted and pull through — reverses heading ~173°, ends upright |
 | **X** | Immelmann | Half loop then roll upright — reverses heading ~172°, costs ~37 speed. Refuses below 105 units/s |
-| **C** | Barrel roll | Corkscrew that scrubs speed and displaces you — forces a closing attacker out in front |
+| **B** | Barrel roll | Corkscrew that scrubs speed and displaces you — forces a closing attacker out in front |
 | **V** | Break turn | Max-G defensive turn into the threat |
 
 Every one of these is flyable by hand with roll and pitch; the keys just make them reliable to execute with a mouse. They run *through* the flight model, so they cost real energy.

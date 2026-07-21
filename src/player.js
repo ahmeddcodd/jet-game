@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { createPlayerJet } from './models.js';
 import { clamp, clamp01, damp, lerp, tmp, TAU } from './utils.js';
 import { ENVELOPE, createFlightState, integrate } from './flight.js';
+import { EYE_OFFSET } from './cockpit.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -96,7 +97,7 @@ const MANEUVERS = {
     ],
   },
   barrelRoll: {
-    name: 'BARREL ROLL', key: 'KeyC', minSpeed: 50, cooldown: 1.8,
+    name: 'BARREL ROLL', key: 'KeyB', minSpeed: 50, cooldown: 1.8,
     // Defensive: the classic way to force a closing attacker out in front.
     // Displaces the jet and scrubs speed without giving up much heading.
     phases: [
@@ -189,6 +190,8 @@ export class Player {
     // offset scales with trauma² so hits punch and then settle fast.
     this.trauma = 0;
     this._shakeTime = 0;
+    this.cockpitView = false;      // false = chase, true = first person
+    this.onViewChange = null;
     this._camUp = new THREE.Vector3(0, 1, 0);
     this._lookTarget = new THREE.Vector3();
   }
@@ -220,7 +223,9 @@ export class Player {
     this._maneuver = null;
     this._manCooldowns.clear();
     this.alive = true;
-    this.mesh.visible = true;
+    // Respect the current view: showing the external hull unconditionally
+    // would pop the fuselage into frame on respawn while in the cockpit.
+    this.mesh.visible = !this.cockpitView;
   }
 
   get forward() {
@@ -489,8 +494,13 @@ export class Player {
       n.mesh.material.emissiveIntensity = 0.3 + k * 0.9;
     }
 
-    // ---- Chase camera ----
-    this._updateCamera(dt);
+    // ---- Camera ----
+    if (inp.pressed.has('KeyC')) {
+      this.cockpitView = !this.cockpitView;
+      if (this.onViewChange) this.onViewChange(this.cockpitView);
+    }
+    if (this.cockpitView) this._updateCockpitCamera(dt);
+    else this._updateCamera(dt);
   }
 
   /**
@@ -505,8 +515,42 @@ export class Player {
    *    you are chasing in frame rather than your own tailpipe;
    *  - FOV opens with speed and afterburner to sell velocity.
    */
+  /**
+   * Cockpit camera: rigidly locked to the airframe at the pilot's eye point.
+   *
+   * No damping and no look-ahead, deliberately. Those exist to make a chase rig
+   * feel weighty, but a pilot's head does not lag their aircraft — any smoothing
+   * here would read as the cockpit sliding around you. Trauma shake still
+   * applies, and because the interior is parented to the camera it shakes with
+   * the view rather than against it.
+   */
+  _updateCockpitCamera(dt) {
+    const cam = this.camera;
+    const q = this.mesh.quaternion;
+    cam.quaternion.copy(q);
+    // The model faces +Z but a three camera looks down -Z, so the view has to
+    // be turned to face the way the aircraft is pointing.
+    cam.rotateY(Math.PI);
+    cam.position.copy(this.mesh.position)
+      .add(tmp.v1.copy(EYE_OFFSET).applyQuaternion(q));
+    cam.up.set(0, 1, 0).applyQuaternion(q);
+
+    const speedT = clamp01((this.speed - this.minSpeed) / (this.maxSpeed - this.minSpeed));
+    const targetFov = 68 + speedT * 10 + (this.boostActive ? 6 : 0);
+    cam.fov = damp(cam.fov, targetFov, 3.5, dt);
+    // The interior sits well inside the chase view's 2.0 near plane, so it
+    // would be clipped away entirely. Pulling the near plane in is safe here
+    // only because the renderer uses a logarithmic depth buffer, which spreads
+    // precision across the range instead of spending it all up close.
+    if (cam.near !== 0.12) { cam.near = 0.12; }
+    cam.updateProjectionMatrix();
+
+    this._applyShake(dt, cam);
+  }
+
   _updateCamera(dt) {
     const cam = this.camera;
+    if (cam.near !== 2.0) { cam.near = 2.0; cam.updateProjectionMatrix(); }
     const q = this.mesh.quaternion;
     const fwd = tmp.v1.copy(FWD).applyQuaternion(q);
     const up = tmp.v2.copy(UP).applyQuaternion(q);

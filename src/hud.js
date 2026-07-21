@@ -370,6 +370,188 @@ export class HUD {
     ctx.restore();
   }
 
+  /**
+   * Avionics HUD — pitch ladder, heading tape, speed/altitude, flight-path
+   * marker, bank scale.
+   *
+   * Every symbol that represents a direction in the world is drawn by
+   * PROJECTING an actual 3D direction through the camera, never by offsetting
+   * pixels from screen centre. That is what makes it correct rather than
+   * approximate: the ladder ends up at the true horizon, rotates properly with
+   * bank, compresses correctly toward the edges of the frame, and stays right
+   * when the FOV changes with speed — none of which a pixels-per-degree
+   * approximation gets for free.
+   *
+   * `av` supplies the already-projected points (see buildAvionics in main.js),
+   * so this function stays pure drawing.
+   */
+  drawAvionics(av) {
+    const ctx = this.tctx;
+    if (!ctx || !av) return;
+    const dpr = this._dpr || 1;
+    const w = this.tacticalCanvas.width / dpr;
+    const h = this.tacticalCanvas.height / dpr;
+    const cx = w / 2, cy = h / 2;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.lineWidth = 1.4;
+    ctx.font = '600 11px ui-monospace,Menlo,monospace';
+    ctx.textBaseline = 'middle';
+    const GREEN = 'rgba(126,255,178,0.92)';
+    const DIM = 'rgba(126,255,178,0.45)';
+    ctx.strokeStyle = GREEN;
+    ctx.fillStyle = GREEN;
+
+    // Clip everything to the glass area so symbology never spills over the
+    // coaming or off the canopy.
+    ctx.beginPath();
+    ctx.rect(w * 0.13, h * 0.06, w * 0.74, h * 0.66);
+    ctx.clip();
+
+    // ---- Pitch ladder ---------------------------------------------------
+    for (const r of av.rungs) {
+      const { a, b, deg } = r;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (!len) continue;
+      const ux = dx / len, uy = dy / len;
+      const gap = deg === 0 ? 0.30 : 0.22;   // horizon bar has a wider break
+
+      ctx.setLineDash(deg < 0 ? [7, 5] : []);   // dive bars dashed, per convention
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(a.x + ux * len * (0.5 - gap / 2), a.y + uy * len * (0.5 - gap / 2));
+      ctx.moveTo(a.x + ux * len * (0.5 + gap / 2), a.y + uy * len * (0.5 + gap / 2));
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+
+      // Tips turn toward the horizon so up/down is unambiguous when inverted.
+      if (deg !== 0) {
+        const tick = deg > 0 ? 7 : -7;
+        const nx = -uy, ny = ux;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y); ctx.lineTo(a.x + nx * tick, a.y + ny * tick);
+        ctx.moveTo(b.x, b.y); ctx.lineTo(b.x + nx * tick, b.y + ny * tick);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      if (deg !== 0) {
+        const label = String(Math.abs(deg));
+        ctx.save();
+        ctx.translate(a.x - ux * 13, a.y - uy * 13);
+        ctx.rotate(Math.atan2(uy, ux));
+        ctx.textAlign = 'center';
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+        ctx.save();
+        ctx.translate(b.x + ux * 13, b.y + uy * 13);
+        ctx.rotate(Math.atan2(uy, ux));
+        ctx.textAlign = 'center';
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    // ---- Flight-path marker ---------------------------------------------
+    // Where the aircraft is actually GOING, as opposed to where the nose
+    // points. On a real HUD this is the symbol you fly with.
+    if (av.fpm) {
+      const { x, y } = av.fpm;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.moveTo(x - 7, y);  ctx.lineTo(x - 17, y);
+      ctx.moveTo(x + 7, y);  ctx.lineTo(x + 17, y);
+      ctx.moveTo(x, y - 7);  ctx.lineTo(x, y - 14);
+      ctx.stroke();
+      ctx.lineWidth = 1.4;
+    }
+
+    // ---- Boresight gun cross --------------------------------------------
+    ctx.strokeStyle = DIM;
+    ctx.beginPath();
+    ctx.moveTo(cx - 12, cy); ctx.lineTo(cx - 4, cy);
+    ctx.moveTo(cx + 4, cy);  ctx.lineTo(cx + 12, cy);
+    ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy - 4);
+    ctx.moveTo(cx, cy + 4);  ctx.lineTo(cx, cy + 12);
+    ctx.stroke();
+    ctx.strokeStyle = GREEN;
+
+    ctx.restore();
+
+    // ---- Tapes and readouts (outside the glass clip) ---------------------
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    ctx.font = '600 11px ui-monospace,Menlo,monospace';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = GREEN;
+    ctx.fillStyle = GREEN;
+    ctx.lineWidth = 1.3;
+
+    // Heading tape across the top, ticks placed by projected compass bearings.
+    const tapeY = h * 0.115;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.30, tapeY + 9); ctx.lineTo(w * 0.70, tapeY + 9);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    for (const t of av.headings) {
+      if (t.x < w * 0.30 || t.x > w * 0.70) continue;
+      ctx.beginPath();
+      ctx.moveTo(t.x, tapeY + 9);
+      ctx.lineTo(t.x, tapeY + (t.major ? 1 : 5));
+      ctx.stroke();
+      if (t.major) ctx.fillText(t.label, t.x, tapeY - 8);
+    }
+    // Own-heading caret
+    ctx.beginPath();
+    ctx.moveTo(cx, tapeY + 15); ctx.lineTo(cx - 5, tapeY + 22); ctx.lineTo(cx + 5, tapeY + 22);
+    ctx.closePath(); ctx.fill();
+    ctx.fillText(av.headingText, cx, tapeY + 32);
+
+    // Airspeed (left) and altitude (right) boxes.
+    const boxY = cy;
+    const drawBox = (x, align, label, value, sub) => {
+      const bw = 74, bh = 30;
+      const bx = align === 'left' ? x : x - bw;
+      ctx.strokeRect(bx, boxY - bh / 2, bw, bh);
+      ctx.textAlign = 'center';
+      ctx.font = '700 15px ui-monospace,Menlo,monospace';
+      ctx.fillText(value, bx + bw / 2, boxY);
+      ctx.font = '600 9px ui-monospace,Menlo,monospace';
+      ctx.fillStyle = DIM;
+      ctx.fillText(label, bx + bw / 2, boxY - bh / 2 - 8);
+      if (sub) ctx.fillText(sub, bx + bw / 2, boxY + bh / 2 + 9);
+      ctx.fillStyle = GREEN;
+    };
+    drawBox(w * 0.20, 'left', 'SPD', String(av.speed), av.mach);
+    drawBox(w * 0.80, 'right', 'ALT', String(av.alt), av.gText);
+
+    // Bank scale — fixed arc with a moving pointer, the standard arrangement.
+    const bankR = Math.min(w, h) * 0.30;
+    ctx.strokeStyle = DIM;
+    for (const d of [-45, -30, -20, -10, 0, 10, 20, 30, 45]) {
+      const a = -Math.PI / 2 + d * Math.PI / 180;
+      const r0 = bankR, r1 = bankR + (d === 0 ? 10 : 6);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.stroke();
+    }
+    const ba = -Math.PI / 2 - av.bankRad;
+    ctx.fillStyle = GREEN;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ba) * (bankR - 2), cy + Math.sin(ba) * (bankR - 2));
+    ctx.lineTo(cx + Math.cos(ba - 0.035) * (bankR - 11), cy + Math.sin(ba - 0.035) * (bankR - 11));
+    ctx.lineTo(cx + Math.cos(ba + 0.035) * (bankR - 11), cy + Math.sin(ba + 0.035) * (bankR - 11));
+    ctx.closePath(); ctx.fill();
+
+    ctx.restore();
+  }
+
   /** Transient score popup near the crosshair. Recycled, never accumulates. */
   floatScore(text, big = false) {
     if (!this.el) return;

@@ -9,6 +9,7 @@ import { ParticleField } from './particles.js';
 import { EnemyJet, EnemyHelo, Bullet, Missile, Flare, MISSILE } from './enemies.js';
 import { TargetingComputer, LOCK_STATE } from './targeting.js';
 import { makeSkyEnvironment } from './surfacing.js';
+import { createCockpit } from './cockpit.js';
 import { loadAll, loadStatus } from './assets.js';
 import { clamp, rand, randInt, tmp } from './utils.js';
 
@@ -79,7 +80,7 @@ const shadowOffset = new THREE.Vector3(-800, 1400, -1200);
 sun.position.copy(shadowOffset);
 
 // World + systems — created AFTER assets are loaded (see init() at bottom).
-let world, particles, player;
+let world, particles, player, cockpit;
 const input = new Input(renderer.domElement);
 const audio = new AudioEngine();
 const hud = new HUD();
@@ -217,6 +218,92 @@ function probeDarkRegion() {
     'jet alt', Math.round(player.position.y), 'spd', Math.round(player.speed));
 }
 
+
+/* ---------- Avionics ------------------------------------------------------
+   Builds the HUD symbology by projecting REAL 3D directions through the
+   camera, rather than offsetting pixels from screen centre by a
+   pixels-per-degree constant. That is the difference between symbology that is
+   correct and symbology that merely looks plausible: projecting puts the
+   horizon bar on the actual horizon, rolls the ladder properly with bank,
+   compresses it toward the frame edges the way a real optical HUD does, and
+   stays right when the FOV widens with speed.                              */
+const _avFwd = new THREE.Vector3();
+const _avFlat = new THREE.Vector3();
+const _avRight = new THREE.Vector3();
+const _avDir = new THREE.Vector3();
+const _avA = new THREE.Vector3();
+const _avB = new THREE.Vector3();
+const _avUp = new THREE.Vector3(0, 1, 0);
+const _avCamFwd = new THREE.Vector3();
+
+/** Project a world DIRECTION to screen. Returns null if it is behind us. */
+function projectDir(dir, w, h) {
+  _avCamFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  if (dir.dot(_avCamFwd) <= 0.02) return null;          // behind or edge-on
+  const p = _avA.copy(camera.position).addScaledVector(dir, 1000).project(camera);
+  return { x: (p.x * 0.5 + 0.5) * w, y: (-p.y * 0.5 + 0.5) * h };
+}
+
+function buildAvionics() {
+  const w = window.innerWidth, h = window.innerHeight;
+  camera.updateMatrixWorld(true);
+
+  // Heading basis: the aircraft's forward flattened onto the horizontal plane.
+  _avFwd.set(0, 0, 1).applyQuaternion(player.mesh.quaternion);
+  _avFlat.copy(_avFwd).setY(0);
+  if (_avFlat.lengthSq() < 1e-6) _avFlat.set(0, 0, 1);   // straight up or down
+  _avFlat.normalize();
+  _avRight.crossVectors(_avFlat, _avUp).normalize();
+
+  // ---- Pitch ladder: a rung every 10°, spanning the useful range ---------
+  const rungs = [];
+  const halfWidth = 0.16;            // rung half-length as a direction offset
+  for (let deg = -60; deg <= 60; deg += 10) {
+    const r = deg * Math.PI / 180;
+    // Direction at elevation `deg` along the current heading.
+    _avDir.copy(_avFlat).multiplyScalar(Math.cos(r)).addScaledVector(_avUp, Math.sin(r)).normalize();
+    const a = projectDir(_avA.copy(_avDir).addScaledVector(_avRight, -halfWidth).normalize(), w, h);
+    const b = projectDir(_avB.copy(_avDir).addScaledVector(_avRight, halfWidth).normalize(), w, h);
+    if (a && b) rungs.push({ a, b, deg });
+  }
+
+  // ---- Heading tape: a tick every 10°, labelled every 30° ----------------
+  const headings = [];
+  const hdgNow = (Math.atan2(_avFlat.x, _avFlat.z) * 180 / Math.PI + 360) % 360;
+  for (let d = -60; d <= 60; d += 10) {
+    const brg = hdgNow + d;
+    const rad = brg * Math.PI / 180;
+    _avDir.set(Math.sin(rad), 0, Math.cos(rad));
+    const p = projectDir(_avDir, w, h);
+    if (!p) continue;
+    const norm = ((Math.round(brg) % 360) + 360) % 360;
+    headings.push({
+      x: p.x, major: norm % 30 === 0,
+      label: String(Math.round(norm / 10)).padStart(2, '0'),
+    });
+  }
+
+  // ---- Flight-path marker: where we are actually going -------------------
+  let fpm = null;
+  if (player.velocity.lengthSq() > 1) {
+    fpm = projectDir(_avDir.copy(player.velocity).normalize(), w, h);
+  }
+
+  // Bank, signed so a right bank swings the pointer right.
+  const leftWingY = _avA.set(1, 0, 0).applyQuaternion(player.mesh.quaternion).y;
+  const upY = _avB.set(0, 1, 0).applyQuaternion(player.mesh.quaternion).y;
+
+  return {
+    rungs, headings, fpm,
+    bankRad: Math.atan2(leftWingY, upY),
+    speed: Math.round(player.speed),
+    alt: Math.round(player.position.y),
+    mach: 'M ' + (player.speed / 190).toFixed(2),
+    gText: player.gLoad.toFixed(1) + 'G',
+    headingText: String(Math.round(hdgNow)).padStart(3, '0'),
+  };
+}
+
 // ---------- Chase / targeting overlay ----------
 const PLAYER_BULLET_SPEED = 420;
 const _tv1 = new THREE.Vector3();
@@ -288,6 +375,9 @@ function updateTactical(dt) {
   }
 
   hud.drawTactical(_tactical, { active: threatActive });
+  // Full avionics only in the cockpit — in chase view the aircraft itself is
+  // the attitude reference, and a pitch ladder over it just adds clutter.
+  if (player.cockpitView) hud.drawAvionics(buildAvionics());
   hud.drawStick(input.mouseX, input.mouseY);
   hud.setThreat(threatActive, threatDist);
 
@@ -835,6 +925,18 @@ hud.resizeTactical(window.innerWidth, window.innerHeight);
     player.onFireGun = firePlayerGun;
     player.onFireMissile = firePlayerMissile;
     player.onFlares = deployFlares;
+    // Cockpit interior rides on the camera (see cockpit.js) and the external
+    // hull is hidden from the inside — otherwise you sit inside an opaque
+    // fuselage looking at the back of its own canopy.
+    cockpit = createCockpit();
+    cockpit.visible = false;
+    camera.add(cockpit);
+    scene.add(camera);
+    player.onViewChange = (inCockpit) => {
+      cockpit.visible = inCockpit;
+      player.mesh.visible = !inCockpit;
+      hud.message(inCockpit ? 'COCKPIT' : 'CHASE', '', 0.9);
+    };
     player.onManeuver = (name, failed) => hud.message(name, '', failed ? 1.0 : 0.9);
     scene.add(player.mesh);
     assetsReady = true;
