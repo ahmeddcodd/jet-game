@@ -88,8 +88,8 @@ Response is graded and stable across the range: a 2px/frame drag settles at 9° 
 
 | Key | Maneuver | What it does |
 |---|---|---|
-| **Z** | Split-S | Roll inverted and pull through — reverses heading, trades ~95 m of altitude for speed |
-| **X** | Immelmann | Half loop then roll upright — reverses heading, buys ~110 m of altitude at a cost of ~78 speed. Refuses below 105 units/s |
+| **Z** | Split-S | Roll inverted and pull through — reverses heading ~173°, ends upright |
+| **X** | Immelmann | Half loop then roll upright — reverses heading ~172°, costs ~37 speed. Refuses below 105 units/s |
 | **C** | Barrel roll | Corkscrew that scrubs speed and displaces you — forces a closing attacker out in front |
 | **V** | Break turn | Max-G defensive turn into the threat |
 
@@ -101,13 +101,14 @@ Every one of these is flyable by hand with roll and pitch; the keys just make th
 
 - **Energy fighting.** Speed is an outcome of thrust, the gravity component along your flight path, and drag — not a number you set. Diving builds energy, climbing spends it, and hard turns bleed it. Turn rate peaks at a **corner speed of 115 units/s**; below that the wing can't pull limit G, above it you're structurally capped and the radius grows:
 
-  | Speed | 60 | 90 | **115** | 150 | 200 |
+  | Speed | 50 | 80 | **115** | 150 | 200 |
   |---|---|---|---|---|---|
-  | Turn rate °/s | 67 | 92 | **109.8** | 89.5 | 68.7 |
+  | Turn rate °/s | 108 | 134 | **145** | 125 | 105 |
 
+- **One flight model for both sides.** The player and the AI fly the *same* code ([`src/flight.js`](src/flight.js)) — the same lift-limited G, the same corner speed, the same coordinated turn, and speed as an outcome of thrust, gravity along the flight path and drag. Enemies used to slerp their nose onto a target vector at a fixed rate with their speed assigned directly, so they could turn as hard at 40 units/s as at 200 and never gained a knot in a dive. Now a bandit's bank never moves faster than the airframe's roll rate (measured: median 0.12°/frame, max 3.04° against a 3.25°/frame limit), so nothing it does is outside what your own jet could do.
 - **Pursuit dogfighting, both ways.** Enemy jets run a full BFM state machine — **lag pursuit** to kill an overtake, **pure** to close, **lead** for a gun solution, **high yo-yo** when overshooting, **low yo-yo** to convert altitude into closure, and defensively **break**, **barrel roll** to force an overshoot, or **flat scissors** to drag you out in front. They pick the response that fits the geometry: a fast attacker close aboard gets a barrel roll, a slow grinding one gets scissored.
 - **Radar lock and countermeasures.** A lock takes ~1.15 s of holding a bandit in the seeker cone, so breaking hard before the tone goes solid is a real counter. Both sides carry flares.
-- **You can be hunted.** Enemy pursuit speed (124–163) is faster than your cruise (~104) but slower than your afterburner (~220). Ignoring a bandit on your six gets you killed; escaping is always possible, but costs you the burner you might have wanted for the chase.
+- **You can be hunted.** A bandit chasing you asks for *your* speed plus a closure term proportional to the range it still has to take out, so it accelerates to run you down and decelerates to settle on your six rather than overshooting. Measured from a cold start 900 units astern: it closes 900 → 650 → 433 → 228 and stabilises at 148, matching speed exactly. Ignoring one gets you killed; escaping is possible but costs you the burner you wanted for the chase.
 - **Endless wave survival.** Each wave spawns a mix of **enemy jets** (fast interceptors) and **helicopters** (slow gunships that maintain range and strafe).
 - **Scoring:** jets = 150 pts, helicopters = 200 pts, plus a wave-clear bonus of `250 × wave`.
 - **Health (HULL):** you start at 100. Enemy bullets deal 6–9 dmg. Brief invulnerability after a hit prevents instant death.

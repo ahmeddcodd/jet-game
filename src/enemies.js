@@ -2,6 +2,10 @@
 import * as THREE from 'three';
 import { createEnemyJet, createHelicopter } from './models.js';
 import { clamp, damp, rand, randInt, pick, tmp, TAU } from './utils.js';
+import {
+  ENVELOPE, createFlightState, integrate, bankForTurn, pitchForClimb,
+  throttleForSpeed, bankAngleOf,
+} from './flight.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -13,19 +17,11 @@ const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _up = new THREE.Vector3();
-const _m4 = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
 // Helpers get their own scratch: reusing the caller's would silently clobber
 // vectors still live further down the same update().
 const _h1 = new THREE.Vector3();
 const _h2 = new THREE.Vector3();
 const _h3 = new THREE.Vector3();
-// _steer's own set. Callers pass their `desired` vector straight in, so _steer
-// must never touch a vector the caller might also be holding.
-const _s1 = new THREE.Vector3();
-const _s2 = new THREE.Vector3();
-const _s3 = new THREE.Vector3();
-const _s4 = new THREE.Vector3();
 
 /* ---------- Dogfight tuning ------------------------------------------------
    Pulled out so the whole feel of the fight can be adjusted in one place. */
@@ -73,8 +69,6 @@ class Enemy {
     this._prevPos = new THREE.Vector3();
     this._hasPrev = false;
     this.born = performance.now() / 1000;
-    this.targetOffset = new THREE.Vector3();
-    this.randomTimer = 0;
     // Stores + hooks filled by the game
     this.missiles = 2;
     this.missileCooldown = rand(6, 14);
@@ -118,32 +112,6 @@ class Enemy {
     }
   }
 
-  // Face current velocity direction
-  _face(dir, dt, rate = 2.5) {
-    const desiredQ = tmp.q1.setFromUnitVectors(FWD, dir.clone().normalize());
-    this.mesh.quaternion.slerp(desiredQ, 1 - Math.exp(-rate * dt));
-  }
-
-  /**
-   * Steer toward `desiredDir`, banking into the turn like an aircraft instead
-   * of yawing flat. Reads as a real jet and, more practically, telegraphs to
-   * the player which way a bandit is about to go.
-   */
-  _steer(desiredDir, dt, rate = 2.2, bankScale = 1) {
-    const fwd = _s1.set(0, 0, 1).applyQuaternion(this.mesh.quaternion);
-    // Signed yaw error: positive means we need to turn one way, negative the other.
-    const turn = _s2.crossVectors(fwd, desiredDir).dot(UP);
-    this.bank = damp(this.bank, clamp(-turn * 2.4, -1, 1) * bankScale, 3.2, dt);
-
-    _s3.copy(UP).applyAxisAngle(desiredDir, this.bank * 1.15);
-    _s4.copy(this.mesh.position).add(desiredDir);
-    // Matrix4.lookAt(eye, target, up) sets +Z = normalize(eye - target), so
-    // passing (aimPoint, position) points the model's nose down desiredDir.
-    _m4.lookAt(_s4, this.mesh.position, _s3);
-    _q.setFromRotationMatrix(_m4);
-    this.mesh.quaternion.slerp(_q, 1 - Math.exp(-rate * dt));
-  }
-
   /** Unit forward vector of this aircraft. Written into `out`. */
   forward(out) {
     return out.set(0, 0, 1).applyQuaternion(this.mesh.quaternion);
@@ -185,6 +153,17 @@ class Enemy {
 
    The BREAK state is what makes the fight a chase in both directions: close on
    a bandit and it will try to shake you rather than obligingly fly straight.  */
+/* Target speeds the AI asks for, expressed against the shared envelope rather
+   than as multipliers of a per-bandit base — so "go to corner speed" means the
+   same thing for every aircraft, and matches what the player's own jet does. */
+const SPD = {
+  scrub:  ENVELOPE.cornerSpeed * 0.72,   // ~83  slow, out-of-phase fighting
+  slow:   ENVELOPE.cornerSpeed * 0.92,   // ~106 bleeding off an overtake
+  corner: ENVELOPE.cornerSpeed,          // 115  best sustained turn rate
+  fast:   ENVELOPE.cornerSpeed * 1.55,   // ~178 running the gap down
+  run:    ENVELOPE.cornerSpeed * 1.80,   // ~207 disengaging
+};
+
 const JET_STATE = {
   PURSUE: 'pursue',      // close on the six using a lag/pure/lead curve
   ATTACK: 'attack',      // gun solution held
@@ -206,12 +185,25 @@ export class EnemyJet extends Enemy {
     //   both well under the player's boost, so escape and pursuit stay winnable.
     super(createEnemyJet(palette), 'jet', 30, rand(95, 125), 150);
     this.palette = palette;
-    this.baseSpeed = this.speed;
     this.bank = 0;
     this.state = JET_STATE.PURSUE;
     this.stateTimer = 0;
-    this.breakDir = 1;          // which way this pilot rolls out of trouble
+    this.stateDwell = 0;        // minimum time before this state may be abandoned
+
+    // Flies the same model as the player (see flight.js): lift-limited G,
+    // bank-then-pull steering, and speed as a consequence of thrust and drag
+    // rather than a number assigned each frame.
+    this.fs = createFlightState(this.speed);
+
+    // Per-pilot traits, rolled ONCE at spawn. Everything downstream is then a
+    // deterministic function of geometry — no per-frame dice — so a bandit
+    // commits to a maneuver and the player can read what it is doing. The
+    // variety between bandits comes from these fixed traits, not from noise.
     this.aggression = rand(0.75, 1.25);
+    this.defenseStyle = Math.random();   // 0 = prefers rolling, 1 = prefers scissors
+    this.breakBias = Math.random() < 0.5 ? -1 : 1;
+    this.breakDir = this.breakBias;
+
     this._spawn(playerPos);
   }
 
@@ -224,9 +216,24 @@ export class EnemyJet extends Enemy {
     this.mesh.position.y = clamp(playerPos.y + rand(-120, 200), 60, 600);
   }
 
-  _enter(state, duration = 0) {
+  _enter(state, duration = 0, dwell = 0) {
+    if (this.state !== state) this.stateDwell = dwell;
     this.state = state;
     this.stateTimer = duration;
+  }
+
+  /**
+   * Which way to roll out of trouble.
+   *
+   * Continue the roll already in progress, so a defensive move flows out of
+   * the aircraft's current attitude instead of snapping to a coin flip; only
+   * near wings-level does the pilot's fixed bias decide. Deterministic, and it
+   * reads as one continuous maneuver rather than a twitch.
+   */
+  _rollOutDir() {
+    const bank = bankAngleOf(this.mesh.quaternion);
+    if (Math.abs(bank) > 0.20) return Math.sign(bank);
+    return this.breakBias;
   }
 
   update(dt, t, player) {
@@ -247,51 +254,56 @@ export class EnemyJet extends Enemy {
       ? (this._prevDist - dist) / dt : 0;
     this._prevDist = dist;
 
-    // ---- Transitions -------------------------------------------------
+    // ---- Transitions ---------------------------------------------------
+    // Every decision below is a function of the engagement geometry — range,
+    // closure, aspect, energy — plus this pilot's fixed traits. Nothing is
+    // re-rolled per frame, and `stateDwell` stops a bandit abandoning a
+    // maneuver the instant the geometry wobbles. Together that is the
+    // difference between a chase you can read and one that looks like noise.
+    this.stateDwell -= dt;
+    const committed = this.stateDwell > 0;
     const transient = this.state === JET_STATE.YOYO_HI || this.state === JET_STATE.YOYO_LO
       || this.state === JET_STATE.ROLL || this.state === JET_STATE.SCISSORS;
 
     if (this.hp <= this.maxHp * FIGHT.extendHpFrac && this.state !== JET_STATE.EXTEND) {
-      this._enter(JET_STATE.EXTEND);
-      this.breakDir = Math.random() < 0.5 ? -1 : 1;
+      this._enter(JET_STATE.EXTEND, 0, 1.5);
+      this.breakDir = this._rollOutDir();
     } else if (this.state === JET_STATE.EXTEND) {
       // Run until we have room, then turn back into the fight.
-      if (dist > FIGHT.extendDistance) this._enter(JET_STATE.PURSUE);
-    } else if (hunted && !transient) {
-      // Defensive. Pick the response that fits the geometry rather than always
-      // breaking: a fast attacker close aboard is beaten by forcing an
-      // overshoot, a slow grinding one by scissoring.
-      // closure > 0 means the gap is shrinking, i.e. they are running us down.
-      const attackerClosing = closure > 30;
-      if (dist < 170 && attackerClosing && Math.random() < 0.6) {
-        this._enter(JET_STATE.ROLL, rand(1.4, 1.9));
-      } else if (dist < 230 && !attackerClosing && Math.random() < 0.45) {
-        this._enter(JET_STATE.SCISSORS, rand(2.4, 3.4));
-        this.scissorPhase = 0;
-      } else {
-        this._enter(JET_STATE.BREAK, rand(...FIGHT.breakDuration));
-      }
-      this.breakDir = Math.random() < 0.5 ? -1 : 1;
+      if (dist > FIGHT.extendDistance) this._enter(JET_STATE.PURSUE, 0, 1.0);
+    } else if (hunted && !transient && !committed) {
+      this._goDefensive(dist, closure);
     } else if (transient || this.state === JET_STATE.BREAK) {
-      if (this.stateTimer <= 0 && !hunted) this._enter(JET_STATE.PURSUE);
-      else if (this.stateTimer <= 0) this._enter(JET_STATE.BREAK, rand(...FIGHT.breakDuration));
-    } else {
-      const onTarget = myFwd.dot(dirToPlayer) > 0.90;
+      // Re-evaluate when the current move expires. Always re-entering BREAK
+      // here meant a bandit that got jumped would break, and break, and break —
+      // the roll and scissors defences became unreachable once a fight started.
+      if (this.stateTimer <= 0 && !hunted) this._enter(JET_STATE.PURSUE, 0, 0.8);
+      else if (this.stateTimer <= 0) this._goDefensive(dist, closure);
+    } else if (!committed) {
+      // Hysteresis on the gun-solution test. A single threshold sat right on
+      // the boundary and flipped PURSUE/ATTACK about three times a second —
+      // 93 changes in 30 seconds — which kept yanking the aim point between
+      // the target's six and a lead point.
+      const aim = myFwd.dot(dirToPlayer);
+      const onTarget = this.state === JET_STATE.ATTACK ? aim > 0.85 : aim > 0.93;
       // Offensive closure management — the yo-yos.
       if (dist < 260 && closure > 55) {
         // Overshooting: pull up out of plane to bleed closure, then drop back in.
-        this._enter(JET_STATE.YOYO_HI, rand(0.9, 1.4));
+        this._enter(JET_STATE.YOYO_HI, 1.1, 0.9);
       } else if (dist > 520 && closure < 12 && this.mesh.position.y > player.position.y + 90) {
         // Falling behind with altitude in hand: trade it for speed.
-        this._enter(JET_STATE.YOYO_LO, rand(0.9, 1.3));
+        this._enter(JET_STATE.YOYO_LO, 1.1, 0.9);
       } else {
-        this._enter(onTarget && dist < FIGHT.gunRange ? JET_STATE.ATTACK : JET_STATE.PURSUE);
+        // Short dwell here too, so even a legitimate PURSUE/ATTACK swap has to
+        // hold for a moment rather than toggling on frame-to-frame noise.
+        this._enter(onTarget && dist < FIGHT.gunRange
+          ? JET_STATE.ATTACK : JET_STATE.PURSUE, 0, 0.5);
       }
     }
 
     // ---- Steering per state -------------------------------------------
     const desired = _c;
-    let speedMul = 1;
+    let targetSpeed = SPD.corner;
 
     switch (this.state) {
       case JET_STATE.BREAK: {
@@ -301,14 +313,14 @@ export class EnemyJet extends Enemy {
         desired.add(side.multiplyScalar(1.4)).normalize();
         desired.y += 0.35 * this.breakDir;
         desired.normalize();
-        speedMul = 1.25;
+        targetSpeed = SPD.corner;      // corner speed = best turn rate
         break;
       }
       case JET_STATE.EXTEND: {
         desired.copy(this.mesh.position).sub(player.position).normalize();
         desired.y += 0.12;
         desired.normalize();
-        speedMul = 1.45;
+        targetSpeed = SPD.run;         // separate, then re-engage
         break;
       }
       case JET_STATE.YOYO_HI: {
@@ -317,7 +329,7 @@ export class EnemyJet extends Enemy {
         desired.copy(dirToPlayer);
         desired.y += 0.85;
         desired.normalize();
-        speedMul = 0.82;
+        targetSpeed = SPD.slow;        // trading speed for position
         break;
       }
       case JET_STATE.YOYO_LO: {
@@ -326,7 +338,7 @@ export class EnemyJet extends Enemy {
         desired.copy(dirToPlayer);
         desired.y -= 0.75;
         desired.normalize();
-        speedMul = 1.45;
+        targetSpeed = SPD.fast;        // altitude converted into closure
         break;
       }
       case JET_STATE.ROLL: {
@@ -338,7 +350,7 @@ export class EnemyJet extends Enemy {
         desired.addScaledVector(side, Math.cos(phase) * 1.5);
         desired.y += Math.sin(phase) * 1.2;
         desired.normalize();
-        speedMul = 0.72;   // scrubbing speed is the entire point
+        targetSpeed = SPD.scrub;       // scrubbing speed is the entire point
         break;
       }
       case JET_STATE.SCISSORS: {
@@ -348,13 +360,13 @@ export class EnemyJet extends Enemy {
         if (this.scissorPhase > 0.85) { this.scissorPhase = 0; this.breakDir *= -1; }
         const side = _up.crossVectors(dirToPlayer, UP).normalize();
         desired.copy(dirToPlayer).addScaledVector(side, this.breakDir * 2.1).normalize();
-        speedMul = 0.68;
+        targetSpeed = SPD.scrub;       // slow, out-of-phase fight
         break;
       }
       case JET_STATE.ATTACK: {
         // Lead the target so the shot has somewhere to arrive.
         desired.copy(this._leadPoint(player, dist)).sub(this.mesh.position).normalize();
-        speedMul = dist < 220 ? 0.86 : 1.0;   // don't overshoot into a merge
+        targetSpeed = this._closureSpeed(dist, player);
         break;
       }
       default: {
@@ -373,7 +385,8 @@ export class EnemyJet extends Enemy {
           six.copy(this._leadPoint(player, dist));   // transition to a firing solution
         }
         desired.sub(this.mesh.position).normalize();
-        speedMul = dist > 400 ? 1.3 : (closure > 70 ? 0.88 : 1.05);
+        targetSpeed = this._closureSpeed(dist, player);
+        if (closure > 70 && dist < 340) targetSpeed = SPD.slow;   // kill an overtake
         break;
       }
     }
@@ -383,10 +396,23 @@ export class EnemyJet extends Enemy {
     if (this.mesh.position.y > 640) desired.y = Math.min(desired.y, -0.32);
     desired.normalize();
 
-    const turnRate = this.state === JET_STATE.BREAK ? 3.1 : 2.2;
-    this._steer(desired, dt, turnRate * this.aggression, 1);
-
-    this.speed = damp(this.speed, this.baseSpeed * speedMul, 1.8, dt);
+    // ---- Fly it ---------------------------------------------------------
+    // Exactly the player's model: bank toward where you want to go, pull, and
+    // let speed be the outcome of thrust, gravity along the flight path and
+    // drag. The AI never sets its speed or heading directly — it works the same
+    // controls, inside the same envelope, so a bandit cannot out-turn physics
+    // and the player's feel for their own jet predicts what the enemy can do.
+    const bankGain = (this.state === JET_STATE.BREAK ? 3.4 : 2.6) * this.aggression;
+    const fwdY = this.forward(_d).y;
+    integrate(this.mesh, this.fs, {
+      bank:  bankForTurn(this.mesh.quaternion, desired, ENVELOPE, bankGain),
+      pitch: pitchForClimb(this.mesh.quaternion, desired),
+      throttle: throttleForSpeed(this.fs, targetSpeed, fwdY),
+      // Burner only when genuinely trying to run the gap down or open it.
+      boost: targetSpeed >= SPD.fast && this.fs.speed < targetSpeed - 15,
+    }, dt);
+    this.speed = this.fs.speed;
+    this.bank = bankAngleOf(this.mesh.quaternion);
     this.mesh.position.addScaledVector(this.forward(_d), this.speed * dt);
 
     // ---- Guns ---------------------------------------------------------
@@ -418,6 +444,46 @@ export class EnemyJet extends Enemy {
     this._flashUpdate();
   }
 
+  /**
+   * Pick a defensive move from the engagement geometry.
+   *
+   * A fast attacker close aboard is beaten by forcing an overshoot; one
+   * grinding around at matched speed is beaten by scissoring; otherwise break.
+   * `defenseStyle` is fixed per pilot and only breaks ties inside the overlap
+   * band, so the same situation always draws the same response from the same
+   * bandit — variety between pilots, consistency within one.
+   */
+  _goDefensive(dist, closure) {
+    // closure > 0 means the gap is shrinking, i.e. they are running us down.
+    const attackerClosing = closure > 30;
+    if (dist < 170 && attackerClosing && this.defenseStyle < 0.65) {
+      this._enter(JET_STATE.ROLL, 1.6, 1.4);
+    } else if (dist < 230 && !attackerClosing && this.defenseStyle > 0.45) {
+      this._enter(JET_STATE.SCISSORS, 2.8, 2.0);
+      this.scissorPhase = 0;
+    } else {
+      this._enter(JET_STATE.BREAK, 2.2, 1.6);
+    }
+    this.breakDir = this._rollOutDir();
+  }
+
+  /**
+   * Speed to ask for in order to close on the target's six.
+   *
+   * Match the target's speed, plus a term proportional to how much range there
+   * is left to take out. Continuous, so there is no threshold for the bandit to
+   * settle against — discrete speed bands produced a stable equilibrium exactly
+   * at the band edge and the chase stalled there. It also self-limits: at the
+   * desired range the closure term is zero and the bandit simply formates on
+   * the target's tail, and inside it the term goes negative so it backs off
+   * instead of overrunning into a merge.
+   */
+  _closureSpeed(dist, player) {
+    const want = FIGHT.sixDistance;
+    const match = player.speed || SPD.corner;
+    return clamp(match + (dist - want) * 0.45, SPD.scrub, SPD.run);
+  }
+
   /** Where the player will be when the bullet arrives. */
   _leadPoint(player, dist) {
     const bulletSpeed = 520;
@@ -438,6 +504,8 @@ export class EnemyHelo extends Enemy {
     this.rotorSpin = 0;
     this.jinkTimer = 0;
     this.jinkDir = pick([-1, 1]);
+    this.strafeDir = pick([-1, 1]);
+    this.strafeTimer = rand(2.5, 4.5);
   }
   _spawn(playerPos) {
     const a = rand(0, TAU);
@@ -456,10 +524,20 @@ export class EnemyHelo extends Enemy {
     const dir = toPlayer.clone().normalize();
 
     // Maintain preferred range: approach if far, back off if close
+    // Strafe direction is held and only reversed on a timer. It used to be
+    // re-picked with pick([-1,1]) EVERY FRAME, so at 60fps the gunship was
+    // being told to strafe left and right ~30 times a second — it vibrated in
+    // place instead of translating. This is the single worst source of
+    // "enemies move randomly" in the whole game.
+    this.strafeTimer -= dt;
+    if (this.strafeTimer <= 0) {
+      this.strafeDir *= -1;
+      this.strafeTimer = rand(2.5, 4.5);
+    }
     let moveDir;
     if (dist > this.preferredRange + 40) moveDir = dir.clone();
     else if (dist < this.preferredRange - 40) moveDir = dir.clone().negate();
-    else moveDir = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(pick([-1, 1])); // strafe
+    else moveDir = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(this.strafeDir);
 
     // Bob up & down
     moveDir.y = Math.sin(t * 1.2 + this.born) * 0.4;

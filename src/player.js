@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { createPlayerJet } from './models.js';
 import { clamp, clamp01, damp, lerp, tmp, TAU } from './utils.js';
+import { ENVELOPE, createFlightState, integrate } from './flight.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const FWD = new THREE.Vector3(0, 0, 1);
@@ -29,19 +30,14 @@ const _axis = new THREE.Vector3();
    That single change is what makes every BFM technique below actually mean
    something: a yo-yo trades altitude for turn rate, a break turn costs you the
    speed you need to escape, and an overshoot is something you can be forced
-   into rather than a scripted event.                                        */
+   into rather than a scripted event.
+
+   The envelope itself lives in flight.js and is SHARED with the AI, so both
+   aircraft obey identical limits. Only the assist layer — the things a human
+   flying with a mouse needs and an AI does not — is defined here.           */
 export const FLIGHT = {
-  gravity: 34,          // units/s² — also the accel available along a vertical dive
-  cornerSpeed: 115,     // speed of peak turn rate; below it lift limits you
-  gLimit: 9,            // structural ceiling
-  thrustMil: 62,        // military power
-  thrustAB: 132,        // afterburner
-  dragPara: 0.002025,   // parasitic ∝ v²  → ~175 top speed at mil, ~255 on burner
-  dragInduced: 0.90,    // induced ∝ G²   → a sustained max-G turn out-drags mil power
-  rollRate: 3.4,        // rad/s, roll is not G-limited
-  rudderRate: 0.42,     // rad/s, weak on purpose — it's for nose authority, not turning
-  stallSpeed: 42,       // below this the wing stops working
-  minSpeed: 26,
+  ...ENVELOPE,
+  rudderRate: 0.42,     // rad/s, weak on purpose — nose authority, not turning
 
   /* ---- Flight assist -----------------------------------------------------
      The energy model is what makes BFM meaningful, but on its own it also made
@@ -77,18 +73,26 @@ const MANEUVERS = {
   splitS: {
     name: 'SPLIT-S', key: 'KeyZ', minSpeed: 55, cooldown: 2.2,
     // Roll inverted, then pull through: reverses heading, trades altitude for speed.
+    // Timings are derived from the measured model, not guessed: a 180° roll at
+    // rate 1.75 takes 1.02/1.75 ≈ 0.58 s, and a 180° pull takes ≈ 1.20 s. The
+    // old 1.55 s pull carried the jet 29% past vertical, so the Split-S came
+    // out the far side still climbing — it gained altitude instead of trading it.
     phases: [
-      { until: 0.55, pitch: 0.05, rollDirect: 1.75 },
-      { until: 2.10, pitch: 1.00, rollDirect: 0 },
+      { until: 0.58, pitch: 0.05, rollDirect: 1.75 },
+      { until: 1.78, pitch: 1.00, rollDirect: 0 },
+      { until: 2.45, pitch: 0.00, level: true },
     ],
   },
   immelmann: {
     name: 'IMMELMANN', key: 'KeyX', minSpeed: 105, cooldown: 2.4,
     // Pull up through a half loop then roll upright: reverses heading, buys
     // altitude with speed. Needs energy to start — that's the point.
+    // 1.26 s for the half loop (measured 1.25 s at this entry speed), then
+    // 1.02/1.7 ≈ 0.60 s to roll upright.
     phases: [
-      { until: 1.45, pitch: 1.00, rollDirect: 0 },
-      { until: 2.05, pitch: 0.05, rollDirect: 1.7 },
+      { until: 1.26, pitch: 1.00, rollDirect: 0 },
+      { until: 1.88, pitch: 0.05, rollDirect: 1.7 },
+      { until: 2.50, pitch: 0.00, level: true },
     ],
   },
   barrelRoll: {
@@ -105,6 +109,7 @@ const MANEUVERS = {
     phases: [
       { until: 0.30, pitch: 0.30, rollDirect: 2.2 },
       { until: 1.70, pitch: 1.00, rollDirect: 0 },
+      { until: 2.20, pitch: 0.00, level: true },
     ],
   },
 };
@@ -126,6 +131,8 @@ export class Player {
     this.minSpeed = FLIGHT.minSpeed;
     this.maxSpeed = 200;
     this.gLoad = 1;
+    // Shared flight state — the same structure the AI flies (see flight.js).
+    this.fs = createFlightState(this.speed);
     this.boost = 1.0;            // afterburner charge 0..1
     this.boostActive = false;
 
@@ -208,6 +215,8 @@ export class Player {
     this.trauma = 0;
     this.speed = 95;
     this.gLoad = 1;
+    this.fs.speed = 95; this.fs.gLoad = 1;
+    this.fs.pitch = this.fs.yaw = this.fs.roll = 0;
     this._maneuver = null;
     this._manCooldowns.clear();
     this.alive = true;
@@ -279,7 +288,12 @@ export class Player {
     return {
       pitch: phase.pitch,
       roll: 0,
-      rollDirect: phase.rollDirect * m.dir,
+      rollDirect: (phase.rollDirect || 0) * m.dir,
+      // A levelling phase hands roll back to the bank hold, which rolls the
+      // wings level from ANY attitude. Open-loop timings alone cannot promise
+      // that: the aircraft slows through a reversal, which changes both the
+      // pitch and roll it achieves, so a Split-S could finish inverted.
+      level: !!phase.level,
     };
   }
 
@@ -354,117 +368,38 @@ export class Player {
     if (kx) mx = clamp(mx + kx, -1, 1);
     if (ky) my = clamp(my - ky, -1, 1);
 
-    const vRatio = this.speed / FLIGHT.cornerSpeed;
-    // Keep a floor under low-speed authority. Physically the wing really does
-    // run out of lift, but letting it go to zero just made slow flight feel
-    // broken; the floor keeps the jet steerable while the turn *rate* still
-    // collapses, so energy management is preserved.
-    const liftG = FLIGHT.gLimit *
-      Math.max(FLIGHT.lowSpeedFloor, Math.min(1, vRatio * vRatio));
-    const stalled = this.speed < FLIGHT.stallSpeed;
-    const authority = stalled ? Math.max(0.5, clamp01((this.speed - FLIGHT.minSpeed) / 16)) : 1;
-    const availG = Math.min(FLIGHT.gLimit, liftG) * authority;
+    // ---- Fly it ---------------------------------------------------------
+    // One integrate() call, the SAME one the enemy AI uses (see flight.js).
+    // Everything above this line is the assist layer — turning mouse and
+    // keyboard into stick commands. Below it, the player's jet is subject to
+    // exactly the envelope the bandits are: lift-limited G, a coordinated turn
+    // about the world vertical, and speed as an outcome of thrust, gravity
+    // along the flight path and drag. Neither side can out-fly the other's
+    // physics, which is what makes the fight legible.
+    integrate(this.mesh, this.fs, {
+      // Mouse X holds a bank angle; A/D and scripted maneuvers roll freely.
+      bank: (man && man.level) ? 0 : mx * FLIGHT.maxBank,
+      // null = use the bank hold. A running maneuver always takes rate control,
+      // even when its current phase commands rate 0 (hold this attitude).
+      freeRoll: (man && man.level) ? null
+              : (man || rollIn) ? ((man ? man.rollDirect : 0) + rollIn) : null,
+      pitch: my,
+      yaw: yawIn * 0.6,
+      throttle: this.throttle,
+      boost: this.boostActive,
+      // A scripted maneuver is flown on raw roll and pitch; letting the
+      // coordinated turn also act would fight the choreography.
+      noCoordTurn: !!man,
+    }, dt);
 
-    // ---- Aircraft attitude ---------------------------------------------
-    // HANDEDNESS — models are built forward = +Z, up = +Y. The chase camera
-    // sits behind the jet looking along +Z, and a Three.js camera looks down
-    // its own -Z, so it is turned 180° about Y relative to world axes and its
-    // screen-right is world -X (measured, not assumed). So the model's local
-    // +X is the jet's LEFT wing as the player sees it.
-    const leftWingY = _a1.set(1, 0, 0).applyQuaternion(this.mesh.quaternion).y;
-    const upY = _a2.set(0, 1, 0).applyQuaternion(this.mesh.quaternion).y;
-
-    // bankAngle MUST be signed the same way as a positive this.roll. Roll is a
-    // rotation about local +Z, which lifts local +X (the left wing) — so a
-    // positive roll banks toward screen right, and atan2(leftWingY, upY) grows
-    // positive with it. Sign this the other way and the bank-hold below flips
-    // from negative to positive feedback: the jet rolls AWAY from the commanded
-    // bank and accelerates into the 180° equilibrium, so the lightest touch on
-    // the mouse ends with the aircraft locked inverted.
-    const bankAngle = Math.atan2(leftWingY, upY);   // +ve = banked screen-right
-
-    // Commanded G comes from the stick alone. The coordinated turn used to be
-    // folded in here as extra body pitch, which is what made steering climb:
-    // a body-frame pull at bank angle φ splits into sin(φ) of horizontal turn
-    // and cos(φ) of *vertical*, and because gravity in this model only bleeds
-    // speed along the flight path (it never curves the trajectory), nothing
-    // absorbed that vertical component. Banking therefore pitched the nose up.
-    // The turn is now applied about the world vertical instead — see below.
-    const cmdG = Math.abs(my) * availG;
-    this.gLoad = damp(this.gLoad, 1 + cmdG, 7, dt);
-
-    const pitchRate = -Math.sign(my) *
-      (cmdG * FLIGHT.gravity * FLIGHT.pitchBoost) / Math.max(this.speed, 24);
-
-    // Roll: free rate under A/D or during a scripted maneuver, otherwise the
-    // mouse holds a bank angle. atan2 measures bank continuously through
-    // inverted, so releasing recovers from any attitude by the shorter way
-    // round instead of leaving the jet stuck upside down.
-    let rollRate;
-    if (man || rollIn) {
-      rollRate = ((man ? man.rollDirect : 0) + rollIn) * FLIGHT.rollRate * authority;
-    } else {
-      // Proportional hold on bank angle. bankAngle and rollRate share a sign
-      // convention, so this is negative feedback: the error shrinks as the jet
-      // reaches the commanded bank and holds there. Because atan2 wraps at
-      // ±180°, releasing the mouse while inverted rolls upright the short way
-      // round rather than stalling upside down.
-      const bankWant = mx * FLIGHT.maxBank;
-      rollRate = clamp((bankWant - bankAngle) * FLIGHT.bankGain,
-                       -FLIGHT.rollRate, FLIGHT.rollRate) * authority;
-    }
-    // Rudder only — the old mouse-X cross-feed here yawed in the BODY frame,
-    // which while banked is partly vertical too and blurred the steering.
-    const yawRate = yawIn * 0.6 * FLIGHT.rudderRate * authority;
-
-    const resp = 8.5;
-    this.pitch = damp(this.pitch, pitchRate, resp, dt);
-    this.yaw   = damp(this.yaw, yawRate, resp, dt);
-    this.roll  = damp(this.roll, rollRate, resp * 1.3, dt);
-
-    // ---- Apply rotation in local space ----
-    _e1.set(this.pitch * dt, this.yaw * dt, this.roll * dt, 'YXZ');
-    _dq.setFromEuler(_e1);
-    this.mesh.quaternion.multiply(_dq).normalize();
-
-    // ---- Coordinated turn ----------------------------------------------
-    // Banking steers the jet, applied as a rotation about the WORLD vertical so
-    // the turn is exactly horizontal — no altitude drift, which is what makes
-    // it feel accurate. Rate is the real level-turn relation, ω = g·tan(φ)/V,
-    // so a steeper bank turns harder and a faster jet turns wider, and rolling
-    // out to wings-level ends the turn precisely.
-    //
-    // Sign: a positive rotation about world +Y carries the nose toward world
-    // +X, which is screen LEFT (see the handedness note above), so a right bank
-    // needs a negative rotation.
-    if (!man && upY > 0.2) {
-      const phi = clamp(bankAngle, -1.30, 1.30);      // cap so tan() stays sane
-      const turn = (FLIGHT.gravity * Math.tan(phi)) / Math.max(this.speed, 45);
-      if (Math.abs(turn) > 1e-5) {
-        _dq.setFromAxisAngle(UP, -turn * FLIGHT.assistCoord * dt);
-        this.mesh.quaternion.premultiply(_dq).normalize();
-      }
-    }
+    // Mirror onto the fields the rest of the game reads.
+    this.speed = this.fs.speed;
+    this.gLoad = this.fs.gLoad;
+    this.pitch = this.fs.pitch;
+    this.yaw = this.fs.yaw;
+    this.roll = this.fs.roll;
 
     const fwd = this.forward;
-
-    // ---- Energy -------------------------------------------------------
-    // Thrust - gravity along the flight path - (parasitic + induced) drag.
-    const thrust = this.boostActive
-      ? FLIGHT.thrustAB
-      : lerp(FLIGHT.thrustMil * 0.15, FLIGHT.thrustMil, this.throttle);
-    const gravityAccel = -FLIGHT.gravity * fwd.y;          // climbing costs, diving pays
-    const drag = FLIGHT.dragPara * this.speed * this.speed
-               + FLIGHT.dragInduced * this.gLoad * this.gLoad;
-    this.speed = Math.max(FLIGHT.minSpeed, this.speed + (thrust + gravityAccel - drag) * dt);
-
-    // Departure: with no airflow the nose falls through regardless of stick.
-    if (stalled) {
-      _axis.set(1, 0, 0).applyQuaternion(this.mesh.quaternion);
-      const drop = (1 - this.speed / FLIGHT.stallSpeed) * 0.9 * dt;
-      _dq.setFromAxisAngle(_axis, -drop * Math.sign(fwd.y || 1));
-      this.mesh.quaternion.premultiply(_dq).normalize();
-    }
 
     // ---- Move forward ----
     this.velocity.copy(fwd).multiplyScalar(this.speed);
