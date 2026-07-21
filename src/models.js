@@ -13,6 +13,72 @@ import * as THREE from 'three';
 import { get, getLOD, collectAircraftHooks, setupShadows, cloneMaterials } from './assets.js';
 import { surfaceAll } from './surfacing.js';
 
+/**
+ * Force the exhaust cavity to true black.
+ *
+ * The Blender pipeline's hex_to_rgb feeds a hex value straight into Principled
+ * base colour, which Blender treats as LINEAR — so an authored 0x05070a
+ * arrives in the engine as roughly #262e38, a mid-grey. Every model colour is
+ * lightened the same way; it happens to suit the airframes, but the one
+ * surface that must read as an absence of surface cannot be grey.
+ *
+ * envMapIntensity matters as much as the colour here: with a scene environment
+ * even a fully rough dielectric picks up ambient reflection, which would fill
+ * the cavity back in with sky.
+ */
+/**
+ * Put a true-black disc immediately in front of each engine glow.
+ *
+ * Doing this at runtime rather than in Blender because the exit disc has to sit
+ * exactly in the nozzle bore, and in the source file that position is buried in
+ * a merged 90k-triangle airframe with a converging nozzle in front of it —
+ * placements there kept ending up occluded by the nozzle wall, so a ray into
+ * the exhaust struck lit metal and the exit read as a solid plug.
+ *
+ * The glow mesh is already at the exit plane and already correctly oriented, so
+ * cloning it and pushing the copy very slightly forward is exact by
+ * construction. The glow draws over the black when the engine is lit; at idle
+ * the glow fades to zero opacity and the black shows through as a hole.
+ */
+function addExhaustVoids(root) {
+  const glows = [];
+  root.traverse((o) => { if (o.isMesh && /^glow/i.test(o.name || '')) glows.push(o); });
+  for (const g of glows) {
+    const disc = new THREE.Mesh(g.geometry, new THREE.MeshBasicMaterial({
+      // MeshBasic, not Standard: an engine exit should not respond to the sun,
+      // the sky or the environment map at all. Any lit material picks up ambient
+      // and turns the hole grey — which is exactly what happened before.
+      color: 0x000000, fog: false,
+    }));
+    disc.name = 'ExhaustVoidRT';
+    disc.position.copy(g.position);
+    disc.quaternion.copy(g.quaternion);
+    disc.scale.copy(g.scale).multiplyScalar(1.35);
+    // Nudge along the model's forward axis so it sits just inside the bore,
+    // behind the glow from the viewer's side.
+    disc.translateZ(0.06);
+    disc.renderOrder = -1;
+    g.parent.add(disc);
+  }
+  return root;
+}
+
+function blackenExhaust(root) {
+  root.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const mm of mats) {
+      if (!mm.name || !/void/i.test(mm.name)) continue;
+      mm.color.setHex(0x04060a);
+      mm.roughness = 1.0;
+      mm.metalness = 0.0;
+      mm.envMapIntensity = 0.0;
+      mm.needsUpdate = true;
+    }
+  });
+  return root;
+}
+
 /** Wrap a glb clone in an identity-transform group. */
 function wrap(glbClone) {
   const wrapper = new THREE.Group();
@@ -79,6 +145,8 @@ function applyAirframeLOD(root) {
 export function createPlayerJet() {
   const root = wrap(get('playerJet'));
   applyAirframeLOD(root);
+  blackenExhaust(root);
+  addExhaustVoids(root);
   surfaceAll(root, AIRCRAFT_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
@@ -139,6 +207,8 @@ export function createPlayerJet() {
 export function createEnemyJet(_palette) {
   const root = wrap(get('enemyJet'));
   applyAirframeLOD(root);
+  blackenExhaust(root);
+  addExhaustVoids(root);
   cloneMaterials(root);   // per-instance first: Material.copy() drops onBeforeCompile
   surfaceAll(root, AIRCRAFT_SURFACE);
   setupShadows(root, true, false);

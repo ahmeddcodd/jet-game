@@ -42,6 +42,7 @@ def build(palette=None):
     m_dark   = mat("E_Dark",   0x180c0c, metallic=0.20, roughness=0.70)
     m_steel  = mat("E_Steel",  0x7a7070, metallic=0.90, roughness=0.40)
     m_red    = mat("E_Red",    0xff4d4d, emission=hex_to_rgb(0xff0000), emission_strength=1.5)
+    m_void   = mat("E_Void",   0x05060a, metallic=0.0, roughness=1.0)
     m_glow   = mat("E_Glow",   0xff5522, emission=hex_to_rgb(0xff5522), emission_strength=2.0)
 
     root = group("EnemyJet", (0, 0, 0))
@@ -215,15 +216,21 @@ def build(palette=None):
 
         noz = cylinder(f"Nozzle{tag}", radius=0.40, depth=0.55, vertices=16, radius2=0.29,
                        location=(sx * 0.58, -4.15, -0.06),
-                       rotation=(math.radians(-90), 0, 0), material=m_steel)
+                       rotation=(math.radians(-90), 0, 0), material=m_dark)
         part(noz)
+
+        # Flat near-black exit disc — see the note in build_player_jet.py.
+        void = cylinder(f"ExhaustVoid{tag}", radius=0.31, depth=0.03, vertices=16,
+                        location=(sx * 0.58, -4.34, -0.06),
+                        rotation=(math.radians(90), 0, 0), material=m_void)
+        part(void)
 
         for i in range(12):
             a = i * (TAU / 12)
             petal = cube(f"Petal{tag}{i}", size=(0.09, 0.32, 0.05),
                          location=(sx * 0.58 + math.cos(a) * 0.33,
                                    -4.24,
-                                   -0.06 + math.sin(a) * 0.33), material=m_steel)
+                                   -0.06 + math.sin(a) * 0.33), material=m_dark)
             petal.rotation_euler.rotate_axis('Y', a)
             part(petal)
 

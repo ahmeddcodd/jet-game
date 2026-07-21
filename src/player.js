@@ -483,7 +483,10 @@ export class Player {
     const glowPulse = 1 + Math.sin(t * 26 + 0.7) * 0.12;
     for (const g of gl) {
       g.material.color.setHSL(lerp(0.075, 0.55, clamp01((heat - 0.52) * 2.4)), 0.85, 0.35 + heat * 0.45);
-      g.material.opacity = clamp01(0.35 + heat * 0.65) * glowPulse;
+      // Scale from ZERO with throttle. A fixed 0.35 floor meant the exhaust
+      // disc glowed even with the engine idle, so the nozzle never read as an
+      // unlit opening.
+      g.material.opacity = clamp01(heat * 1.15) * glowPulse;
       const s = (0.8 + heat * 0.7) * glowPulse;
       g.scale.set(s, s, 1);
     }

@@ -18,7 +18,16 @@ export const EYE_OFFSET = new THREE.Vector3(0, 1.02, 1.45);
 
 function frameMat(color, rough = 0.62, metal = 0.35) {
   return new THREE.MeshStandardMaterial({
-    color, roughness: rough, metalness: metal, side: THREE.DoubleSide,
+    color, roughness: rough, metalness: metal,
+    // FrontSide, deliberately. DoubleSide on a camera-attached object renders
+    // interior backfaces, whose normals point away from every light — they
+    // shade to pure black and fill whatever part of the view they cover with a
+    // hard-edged dark mass. Backface culling makes that impossible.
+    side: THREE.FrontSide,
+    // A small emissive floor so no panel can reach absolute black even with the
+    // sun behind it. Cockpit interiors are lit by instrument spill in reality.
+    emissive: new THREE.Color(color).multiplyScalar(0.35),
+    emissiveIntensity: 0.5,
   });
 }
 
@@ -34,10 +43,6 @@ export function createCockpit() {
   const dark = frameMat(0x1b2027, 0.7, 0.25);
   const panel = frameMat(0x12161b, 0.85, 0.1);
   const trim = frameMat(0x2a323c, 0.55, 0.5);
-  const glassTint = new THREE.MeshStandardMaterial({
-    color: 0x8fd8ff, transparent: true, opacity: 0.05,
-    roughness: 0.06, metalness: 0.0, side: THREE.DoubleSide, depthWrite: false,
-  });
 
   // Layout is derived from the frustum, not guessed. At FOV ~70° the half-angle
   // is 35°, so a feature at distance d and height y lands at |y| / (d*tan35°)
@@ -109,12 +114,10 @@ export function createCockpit() {
     root.add(side);
   }
 
-  // Canopy glass — a faint tint so the sun grazes it, no more.
-  const glass = new THREE.Mesh(new THREE.SphereGeometry(1.62, 24, 16,
-    0, Math.PI * 2, 0, Math.PI * 0.5), glassTint);
-  glass.position.set(0, -0.34, -0.50);
-  glass.rotation.x = Math.PI;
-  root.add(glass);
+  // The canopy glass was removed. At 5% opacity it added nothing visible, but
+  // it was a large double-sided surface enclosing the viewpoint — exactly the
+  // shape that renders as an unlit black dome if anything about the culling or
+  // depth state is off. Not worth the risk for an invisible tint.
 
   root.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
   // Drawn after the world so it always occludes correctly at the near plane.

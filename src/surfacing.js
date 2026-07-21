@@ -374,7 +374,13 @@ export function surfaceAll(root, opts) {
   root.traverse((o) => {
     if (!o.isMesh || !o.material) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
-    for (const m of mats) applyDetailSurfacing(m, opts);
+    for (const m of mats) {
+      // Skip the exhaust cavity. Panel plating, paint-wear metalness and an
+      // environment reflection would all lighten the one surface whose whole
+      // job is to read as an absence of surface.
+      if (m.name && /void/i.test(m.name)) continue;
+      applyDetailSurfacing(m, opts);
+    }
   });
   return root;
 }

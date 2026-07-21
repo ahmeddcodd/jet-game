@@ -47,6 +47,9 @@ def build():
     m_steel  = mat("P_Steel",  0x8a949e, metallic=0.90, roughness=0.35)
     m_red    = mat("P_Red",    0xff4d4d, emission=hex_to_rgb(0xff0000), emission_strength=1.5)
     m_green  = mat("P_Green",  0x30ff30, emission=hex_to_rgb(0x00ff00), emission_strength=1.5)
+    # Near-black, fully rough, zero metal: an engine exit is a deep cavity and
+    # should read as an absence of surface, not as a lit part.
+    m_void   = mat("P_Void",   0x05070a, metallic=0.0, roughness=1.0)
     m_glow   = mat("P_Glow",   0x66ccff, emission=hex_to_rgb(0x66ccff), emission_strength=2.0)
 
     root = group("PlayerJet", (0, 0, 0))
@@ -237,8 +240,23 @@ def build():
         # Convergent nozzle ring
         noz = cylinder(f"Nozzle{tag}", radius=0.34, depth=0.55, vertices=18, radius2=0.24,
                        location=(sx * 0.52, -4.20, -0.10),
-                       rotation=(math.radians(-90), 0, 0), material=m_steel)
+                       rotation=(math.radians(-90), 0, 0), material=m_dark)
         part(noz)
+
+        # Exhaust exit — a flat, near-black disc filling the nozzle bore.
+        #
+        # A recessed cone was tried first and did not work: it sat too far
+        # forward to be seen through the converging bore, so a ray into the
+        # exhaust hit the bright steel nozzle wall instead and the exit read as
+        # a solid plug. A disc at the exit plane cannot be missed from any angle
+        # the exhaust is visible from.
+        #
+        # It sits just FORWARD of the glow disc, so the glow draws over it when
+        # the engine is lit and the black shows through when it is not.
+        void = cylinder(f"ExhaustVoid{tag}", radius=0.26, depth=0.03, vertices=18,
+                        location=(sx * 0.52, -4.40, -0.10),
+                        rotation=(math.radians(90), 0, 0), material=m_void)
+        part(void)
 
         # Petal detail around the nozzle lip — reads as a real engine can
         for i in range(14):
@@ -247,7 +265,7 @@ def build():
                          location=(sx * 0.52 + math.cos(a) * 0.28,
                                    -4.30,
                                    -0.10 + math.sin(a) * 0.28),
-                         material=m_steel)
+                         material=m_dark)
             petal.rotation_euler = (0, 0, 0)
             petal.rotation_euler.rotate_axis('Y', a)
             part(petal)
