@@ -357,24 +357,32 @@ export class Player {
     const authority = stalled ? Math.max(0.5, clamp01((this.speed - FLIGHT.minSpeed) / 16)) : 1;
     const availG = Math.min(FLIGHT.gLimit, liftG) * authority;
 
-    // Aircraft attitude, needed by both assists below.
-    //
-    // HANDEDNESS — the models are built forward = +Z, up = +Y. The chase camera
-    // sits behind the jet looking along +Z, and a Three.js camera looks down its
-    // own -Z, so it is turned 180° about Y relative to world axes: its screen-
-    // right axis is world -X. Measured, not assumed. The upshot is that the
-    // model's local +X is the jet's LEFT side as the player sees it, so
-    // STARBOARD (the pilot's right, and screen right) is local -X.
-    const starboardY = -_a1.set(1, 0, 0).applyQuaternion(this.mesh.quaternion).y;
+    // ---- Aircraft attitude ---------------------------------------------
+    // HANDEDNESS — models are built forward = +Z, up = +Y. The chase camera
+    // sits behind the jet looking along +Z, and a Three.js camera looks down
+    // its own -Z, so it is turned 180° about Y relative to world axes and its
+    // screen-right is world -X (measured, not assumed). So the model's local
+    // +X is the jet's LEFT wing as the player sees it.
+    const leftWingY = _a1.set(1, 0, 0).applyQuaternion(this.mesh.quaternion).y;
     const upY = _a2.set(0, 1, 0).applyQuaternion(this.mesh.quaternion).y;
+
+    // bankAngle MUST be signed the same way as a positive this.roll. Roll is a
+    // rotation about local +Z, which lifts local +X (the left wing) — so a
+    // positive roll banks toward screen right, and atan2(leftWingY, upY) grows
+    // positive with it. Sign this the other way and the bank-hold below flips
+    // from negative to positive feedback: the jet rolls AWAY from the commanded
+    // bank and accelerates into the 180° equilibrium, so the lightest touch on
+    // the mouse ends with the aircraft locked inverted.
+    const bankAngle = Math.atan2(leftWingY, upY);   // +ve = banked screen-right
 
     // Coordinated-turn assist. This is the key to "point and go": banking on
     // its own pulls the nose around, the way a pilot feeds in back-pressure
     // through a turn. Without it, mouse X only rolled the jet — and because
     // yaw is a body axis, once rolled it stopped being a heading change at all,
     // so the jet banked beautifully and flew straight on.
-    const bank = clamp(-starboardY, -1, 1);       // +1 = banked right (starboard down)
-    const coord = !man && upY > 0.2 ? Math.abs(bank) * FLIGHT.assistCoord : 0;
+    const coord = !man && upY > 0.2
+      ? Math.abs(clamp(leftWingY, -1, 1)) * FLIGHT.assistCoord
+      : 0;
 
     // Commanded G: player pull plus the coordinated component.
     const pullIn = clamp01(Math.abs(my) + coord);
@@ -395,13 +403,13 @@ export class Player {
     if (man || rollIn) {
       rollRate = ((man ? man.rollDirect : 0) + rollIn) * FLIGHT.rollRate * authority;
     } else {
-      // bankNow is signed the same way as this.roll so the error term feeds
-      // back negatively — flipping it makes the hold positive-feedback and the
-      // jet rolls to inverted. bankWant is +mx: mouse right banks starboard
-      // down, which with the coordinated pull turns the jet to screen right.
-      const bankNow = Math.atan2(starboardY, upY);
+      // Proportional hold on bank angle. bankAngle and rollRate share a sign
+      // convention, so this is negative feedback: the error shrinks as the jet
+      // reaches the commanded bank and holds there. Because atan2 wraps at
+      // ±180°, releasing the mouse while inverted rolls upright the short way
+      // round rather than stalling upside down.
       const bankWant = mx * FLIGHT.maxBank;
-      rollRate = clamp((bankWant - bankNow) * FLIGHT.bankGain,
+      rollRate = clamp((bankWant - bankAngle) * FLIGHT.bankGain,
                        -FLIGHT.rollRate, FLIGHT.rollRate) * authority;
     }
     const yawRate = (-mx * FLIGHT.assistYaw + yawIn * 0.6) * FLIGHT.rudderRate * authority;
@@ -565,6 +573,20 @@ export class Player {
 
     const follow = 7.0 - speedT * 2.2;
     cam.position.lerp(desired, 1 - Math.exp(-follow * dt));
+
+    // Hard maneuvering swings the desired position around fast enough that the
+    // damped rig can end up almost on top of the jet — measured at 4 units
+    // during a loop, well inside the ~10-unit airframe, so the camera clips
+    // through the model. Push it back out along the jet-to-camera line.
+    const MIN_DIST = 8.5;
+    const gap = tmp.v1.copy(cam.position).sub(this.mesh.position);
+    const gapLen = gap.length();
+    if (gapLen < MIN_DIST) {
+      // Degenerate case: if the camera is exactly on the jet, fall back to
+      // straight behind rather than normalising a zero-length vector.
+      if (gapLen < 1e-3) gap.copy(fwd).multiplyScalar(-1);
+      cam.position.copy(this.mesh.position).addScaledVector(gap.normalize(), MIN_DIST);
+    }
 
     const targetFov = 62 + speedT * 16 + (this.boostActive ? 9 : 0);
     cam.fov = damp(cam.fov, targetFov, 3.5, dt);

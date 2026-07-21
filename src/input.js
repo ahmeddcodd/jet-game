@@ -24,15 +24,22 @@ export class Input {
          `mouseNX *= 0.985` once per frame, so after holding the mouse still
          for one second the surviving command was 0.66 at 30fps but 0.01 at
          240fps — a 73x swing in control feel purely from frame rate.
-       - The return to centre is LINEAR, not exponential. Exponential decay
+       - The return to centre is rate-based, not exponential. Exponential decay
          approaches zero asymptotically without reaching it, so a residual
          command always lingers and the jet drifts; that residue was what the
-         old snapping deadzone existed to paper over. A constant rate actually
-         arrives at zero, which removes both the drift and the need for a
-         deadband — so small, precise corrections now register instead of
-         being swallowed.                                                   */
+         old snapping deadzone existed to paper over. A rate that actually
+         arrives at zero removes both the drift and the need for a deadband, so
+         small precise corrections register instead of being swallowed.
+
+       The rate is a constant floor plus a term proportional to deflection. A
+       single flat rate has to pick between two bad options: set it high and any
+       drag slower than that rate is cancelled outright, so fine aiming inputs
+       do nothing; set it low and recovering from a hard turn crawls. Scaling
+       with deflection recovers quickly from a big input while leaving small
+       ones intact, and the floor keeps it arriving at exactly zero.         */
     this.sensitivity = 0.0022;   // stick units per pixel of mouse movement
-    this.returnRate = 0.40;      // stick units per second back toward centre
+    this.returnBase = 0.15;      // stick units/second, always applied
+    this.returnProp = 1.00;      // extra stick units/second per unit deflection
     this.smoothing = 14;         // command follow rate (1/s)
 
     this._bind();
@@ -107,9 +114,9 @@ export class Input {
     // neutral on its own. Rate is per second, so the feel is identical at any
     // frame rate, and it reaches true zero so the jet stops turning completely
     // instead of creeping.
-    const step = this.returnRate * dt;
-    this.mouseNX = Input._toZero(this.mouseNX, step);
-    this.mouseNY = Input._toZero(this.mouseNY, step);
+    const rate = (v) => (this.returnBase + this.returnProp * Math.abs(v)) * dt;
+    this.mouseNX = Input._toZero(this.mouseNX, rate(this.mouseNX));
+    this.mouseNY = Input._toZero(this.mouseNY, rate(this.mouseNY));
 
     // Smooth the command toward the stick position (already frame-rate correct).
     const k = 1 - Math.exp(-this.smoothing * dt);

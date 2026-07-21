@@ -75,9 +75,14 @@ Notes on the config:
 
 ### How the mouse works
 
-Mouse motion drives a **virtual self-centring stick**, drawn as a small box below the crosshair — pointer lock hides the cursor, so that indicator is the only way to see what you are currently commanding. Horizontal position commands a **bank angle the jet holds**, and the coordinated-turn assist pulls the nose around, so banking alone steers. Stop moving and the stick returns to neutral at a constant **0.40 units/second**, reaching true zero, and the jet rolls wings-level.
+Mouse motion drives a **virtual self-centring stick**, drawn as a small box below the crosshair — pointer lock hides the cursor, so that indicator is the only way to see what you are currently commanding. Horizontal position commands a **bank angle the jet holds**, and the coordinated-turn assist pulls the nose around, so banking alone steers. Release and the stick returns to neutral, and the jet rolls wings-level in about 2¼ seconds from a hard bank.
 
-Every term in the input path is **per second, never per frame**, so the controls feel identical at 30, 60, 144 or 240 fps. There is no deadband, so small corrections register.
+Two properties make it predictable:
+
+- **Everything is per second, never per frame**, so the controls feel identical at 30, 60, 144 or 240 fps.
+- **The return-to-centre scales with deflection** (`returnBase + returnProp × deflection` in [`input.js`](src/input.js)). A single flat rate would either cancel any drag slower than itself — killing fine aiming — or crawl back from a hard turn. There is no deadband, so small corrections register.
+
+Response is graded and stable across the range: a 2px/frame drag settles at 9° of bank, 4px at 31°, 8px at 70°, 20px at 78°.
 
 ### Dogfight maneuvers
 
