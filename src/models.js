@@ -95,6 +95,14 @@ const AIRFRAME_LOD_DISTANCES = [0, 260, 700];
 // Surfacing presets, in OBJECT units. Aircraft get a tight panel pitch and a
 // little paint-wear metalness on raised areas; scenery gets a coarser, purely
 // organic treatment with no metal at all.
+// Liveries are deliberately different between sides. Telling friend from foe at
+// a glance matters more in a dogfight than either scheme looking good on its
+// own, so the player gets a cool grey-blue splinter and bandits the desert
+// tiger stripe from the reference.
+const PLAYER_SURFACE = { scale: 0.9, normalStrength: 0.85, roughAmount: 0.5,
+                         metalAmount: 0.28, aoAmount: 0.55, livery: 'splinter' };
+const ENEMY_SURFACE  = { scale: 0.9, normalStrength: 0.85, roughAmount: 0.5,
+                         metalAmount: 0.28, aoAmount: 0.55, livery: 'desert' };
 const AIRCRAFT_SURFACE = { scale: 0.9, normalStrength: 0.85, roughAmount: 0.5,
                            metalAmount: 0.35, aoAmount: 0.55 };
 const PROP_SURFACE     = { scale: 0.35, normalStrength: 0.7, roughAmount: 0.55,
@@ -147,7 +155,7 @@ export function createPlayerJet() {
   applyAirframeLOD(root);
   blackenExhaust(root);
   addExhaustVoids(root);
-  surfaceAll(root, AIRCRAFT_SURFACE);
+  surfaceAll(root, PLAYER_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.afterburners = hooks.afterburners;
@@ -210,7 +218,7 @@ export function createEnemyJet(_palette) {
   blackenExhaust(root);
   addExhaustVoids(root);
   cloneMaterials(root);   // per-instance first: Material.copy() drops onBeforeCompile
-  surfaceAll(root, AIRCRAFT_SURFACE);
+  surfaceAll(root, ENEMY_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.engineGlows = hooks.engineGlows;
@@ -222,7 +230,7 @@ export function createHelicopter(_palette) {
   const root = wrap(get('helicopter'));
   applyAirframeLOD(root);
   cloneMaterials(root);   // per-instance first: Material.copy() drops onBeforeCompile
-  surfaceAll(root, AIRCRAFT_SURFACE);
+  surfaceAll(root, ENEMY_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.rotor = hooks.rotor;
