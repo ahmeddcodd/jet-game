@@ -14,8 +14,26 @@ export class Input {
     this.mouseDown = false;
     this.mouseDown2 = false;
     this.pointerLocked = false;
-    this.sensitivity = 0.0022;
-    this.deadzone = 0.05;
+
+    /* ---- Virtual stick tuning ------------------------------------------
+       Mouse motion accumulates into a virtual stick position (mouseNX/NY,
+       clamped to +/-1) which the flight model reads as a commanded bank angle
+       and G. Two properties matter for this to feel accurate:
+
+       - Everything is per SECOND, never per frame. The old auto-centre was
+         `mouseNX *= 0.985` once per frame, so after holding the mouse still
+         for one second the surviving command was 0.66 at 30fps but 0.01 at
+         240fps — a 73x swing in control feel purely from frame rate.
+       - The return to centre is LINEAR, not exponential. Exponential decay
+         approaches zero asymptotically without reaching it, so a residual
+         command always lingers and the jet drifts; that residue was what the
+         old snapping deadzone existed to paper over. A constant rate actually
+         arrives at zero, which removes both the drift and the need for a
+         deadband — so small, precise corrections now register instead of
+         being swallowed.                                                   */
+    this.sensitivity = 0.0022;   // stick units per pixel of mouse movement
+    this.returnRate = 0.40;      // stick units per second back toward centre
+    this.smoothing = 14;         // command follow rate (1/s)
 
     this._bind();
   }
@@ -33,7 +51,10 @@ export class Input {
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === this.canvas;
       if (!this.pointerLocked) {
+        // Clear the smoothed command too — leaving it set meant the jet kept
+        // turning for a moment after the pointer was released.
         this.mouseNX = 0; this.mouseNY = 0;
+        this.mouseX = 0; this.mouseY = 0;
       }
     });
 
@@ -68,24 +89,32 @@ export class Input {
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
-  // Called each frame to smooth mouse & apply deadzone + recenter when no input
+  /** Move a value toward zero at a fixed rate, landing exactly on zero. */
+  static _toZero(v, step) {
+    if (v > step) return v - step;
+    if (v < -step) return v + step;
+    return 0;
+  }
+
+  // Called each frame: recentre the virtual stick, then smooth the command.
   update(dt) {
     // Publish this frame's key edges, then start collecting the next frame's.
     // Called before gameplay steps, so consumers see presses on the same frame.
     this.pressed = this._newPresses;
     this._newPresses = new Set();
 
-    // Gentle auto-recenter when no movement (pointer lock gives no "release" event)
-    // We rely on the fact that movementX/Y are 0 when mouse still, so nudge toward 0 slowly.
-    this.mouseNX *= 0.985;
-    this.mouseNY *= 0.985;
+    // Pointer lock gives no "mouse released" event, so the stick eases back to
+    // neutral on its own. Rate is per second, so the feel is identical at any
+    // frame rate, and it reaches true zero so the jet stops turning completely
+    // instead of creeping.
+    const step = this.returnRate * dt;
+    this.mouseNX = Input._toZero(this.mouseNX, step);
+    this.mouseNY = Input._toZero(this.mouseNY, step);
 
-    // deadzone
-    const apply = (v) => (Math.abs(v) < this.deadzone ? 0 : v);
-    // Smooth toward target
-    const k = 1 - Math.exp(-12 * dt);
-    this.mouseX += (apply(this.mouseNX) - this.mouseX) * k;
-    this.mouseY += (apply(this.mouseNY) - this.mouseY) * k;
+    // Smooth the command toward the stick position (already frame-rate correct).
+    const k = 1 - Math.exp(-this.smoothing * dt);
+    this.mouseX += (this.mouseNX - this.mouseX) * k;
+    this.mouseY += (this.mouseNY - this.mouseY) * k;
   }
 }
 

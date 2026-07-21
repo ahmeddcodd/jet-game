@@ -60,8 +60,9 @@ Notes on the config:
 
 | Input | Action |
 |---|---|
-| **Mouse** | Bank (X) and pull (Y) — the primary turn is *bank then pull*, not flat yaw |
-| **A / D** | Roll |
+| **Mouse** | Steer — X banks and turns, Y pulls |
+| **Arrows** | Steer (full keyboard parity with the mouse) |
+| **A / D** | Free roll (bypasses the bank hold — for aerobatics) |
 | **Q / E** | Rudder |
 | **W / S** | Throttle up / down |
 | **Shift** | Afterburner |
@@ -71,6 +72,12 @@ Notes on the config:
 | **Tab** | Cycle targets · **T** drop lock |
 | **Space** | Deploy flares |
 | **P** / **Esc** | Pause |
+
+### How the mouse works
+
+Mouse motion drives a **virtual self-centring stick**, drawn as a small box below the crosshair — pointer lock hides the cursor, so that indicator is the only way to see what you are currently commanding. Horizontal position commands a **bank angle the jet holds**, and the coordinated-turn assist pulls the nose around, so banking alone steers. Stop moving and the stick returns to neutral at a constant **0.40 units/second**, reaching true zero, and the jet rolls wings-level.
+
+Every term in the input path is **per second, never per frame**, so the controls feel identical at 30, 60, 144 or 240 fps. There is no deadband, so small corrections register.
 
 ### Dogfight maneuvers
 

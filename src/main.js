@@ -280,6 +280,7 @@ function updateTactical(dt) {
   }
 
   hud.drawTactical(_tactical, { active: threatActive });
+  hud.drawStick(input.mouseX, input.mouseY);
   hud.setThreat(threatActive, threatDist);
 
   // Lock reticle rides on top of the target boxes.
@@ -835,7 +836,12 @@ hud.resizeTactical(window.innerWidth, window.innerHeight);
     if (import.meta.env.DEV) {
       window.__sky = {
         THREE, renderer, scene, camera, game, world, player, targeting, hud,
-        step: (dt = 1 / 60, n = 1) => { for (let i = 0; i < n; i++) { game.time += dt; stepGame(dt); } },
+        // Mirrors animate()'s ordering exactly — including input.update(),
+        // without which a test silently bypasses the whole mouse pipeline
+        // (virtual stick, recentring, smoothing) and cannot see input bugs.
+        step: (dt = 1 / 60, n = 1) => {
+          for (let i = 0; i < n; i++) { game.time += dt; input.update(dt); stepGame(dt); }
+        },
         // Off-screen frame grab. Renders through a render target so a frame can
         // be inspected without depending on the canvas drawing buffer being
         // preserved. Returns a JPEG data URL.

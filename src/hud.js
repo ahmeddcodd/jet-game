@@ -1,5 +1,7 @@
 // hud.js — heads-up display: health/throttle/boost bars, score, radar, messages,
 // and the chase layer (target lock, lead reticle, off-screen arrows, rear threat).
+const clampUnit = (v) => Math.max(-1, Math.min(1, v));
+
 export class HUD {
   constructor() {
     this.el = document.getElementById('hud');
@@ -301,6 +303,53 @@ export class HUD {
     if (!this.gMeterEl) return;
     this.gMeterEl.textContent = `${g.toFixed(1)}G`;
     this.gMeterEl.className = g > 7.5 ? 'high' : (g > 5 ? 'mid' : '');
+  }
+
+  /**
+   * Virtual stick position, drawn as a small box below the crosshair.
+   *
+   * Pointer lock hides the cursor, so without this the player is flying an
+   * invisible self-centring stick with no way to know what they are currently
+   * commanding — the single biggest reason the controls read as unpredictable.
+   * Seeing the input makes the response learnable.
+   */
+  drawStick(x, y) {
+    const ctx = this.tctx;
+    if (!ctx) return;
+    const dpr = this._dpr || 1;
+    const w = this.tacticalCanvas.width / dpr;
+    const h = this.tacticalCanvas.height / dpr;
+    const cx = w / 2, cy = h / 2 + 96;
+    const R = 26;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+
+    // Frame + centre ticks
+    ctx.strokeStyle = 'rgba(127,255,212,0.22)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - R, cy - R, R * 2, R * 2);
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, cy); ctx.lineTo(cx + 4, cy);
+    ctx.moveTo(cx, cy - 4); ctx.lineTo(cx, cy + 4);
+    ctx.stroke();
+
+    // Commanded position. Screen Y already matches stick sense: mouse down
+    // (pull, nose up) is +y here and draws the dot low, like a real stick.
+    const px = cx + clampUnit(x) * R;
+    const py = cy + clampUnit(y) * R;
+    const active = Math.abs(x) > 0.02 || Math.abs(y) > 0.02;
+    ctx.strokeStyle = active ? 'rgba(127,255,212,0.85)' : 'rgba(127,255,212,0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy); ctx.lineTo(px, py);
+    ctx.stroke();
+    ctx.fillStyle = active ? '#7fffd4' : 'rgba(127,255,212,0.45)';
+    ctx.beginPath();
+    ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   /** Transient score popup near the crosshair. Recycled, never accumulates. */
