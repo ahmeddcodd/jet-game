@@ -2,7 +2,7 @@
 build_enemy_jet.py — detailed enemy interceptor, built in Blender.
 Output: blender/enemy_jet.blend, public/assets/models/enemy_jet.glb
 
-Target: 10,000-11,000 triangles.
+Target: 40,000-41,000 triangles.
 
 Deliberately a different airframe language from the player: broad shoulders,
 variable-geometry look, chunky twin exhausts, heavier ordnance. Silhouette
@@ -27,7 +27,7 @@ from bpy_helpers import (
     select_only, join_except, collect_meshes,
 )
 
-TRI_LO, TRI_HI = 20000, 21000
+TRI_LO, TRI_HI = 40000, 41000
 
 
 def build(palette=None):
@@ -252,7 +252,7 @@ def build(palette=None):
 
     # ------------------------------------------------------------------
     for obj in detail_targets:
-        detail_pass(obj)
+        detail_pass(obj, micro=0.006)
     bevel_edges(mid, width=0.022, segments=2)
     bevel_edges(fwd, width=0.022, segments=2)
 

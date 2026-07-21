@@ -222,10 +222,20 @@ def export_glb(path, draco=True):
         export_lights=False,
         export_animations=False,
         export_draco_mesh_compression_enable=draco,
-        export_draco_mesh_compression_level=6,
-        export_draco_position_quantization=14,
+        export_draco_mesh_compression_level=10,
+        # 12-bit positions span a ~12-unit airframe in 4096 steps, about 3 mm of
+        # model space — far below anything visible at chase-camera range — and
+        # cost two bits per component less than the default 14.
+        #
+        # Do not expect much from tightening these further: measured, the whole
+        # quantization change bought only ~5%. At a 40k budget the file is
+        # dominated by CONNECTIVITY, not attributes, because the panel-inset
+        # detail produces many small disconnected faces — precisely the topology
+        # Draco compresses worst. Normals stay at 10 bits for that reason: the
+        # extra two bits are nearly free here and 8 risks visible lighting steps.
+        export_draco_position_quantization=12,
         export_draco_normal_quantization=10,
-        export_draco_color_quantization=10,
+        export_draco_color_quantization=8,
     )
 
 
@@ -289,7 +299,7 @@ def _bmesh_back(bm, obj):
     obj.data.update()
 
 
-def detail_pass(obj, coarse=0.030, fine=0.012, bevel=0.006):
+def detail_pass(obj, coarse=0.030, fine=0.012, bevel=0.006, micro=None):
     """Two nested panel-line passes plus an edge bevel.
 
     A single inset gives one recessed panel per face. Insetting the *result*
@@ -301,6 +311,9 @@ def detail_pass(obj, coarse=0.030, fine=0.012, bevel=0.006):
     """
     panel_inset(obj, thickness=coarse, depth=-coarse * 0.4)
     panel_inset(obj, thickness=fine, depth=-fine * 0.35)
+    if micro:
+        # Third pass: fastener-scale relief inside each plate.
+        panel_inset(obj, thickness=micro, depth=-micro * 0.3)
     if bevel:
         bevel_edges(obj, width=bevel, segments=2)
     return obj
@@ -416,12 +429,25 @@ def normalize_tris(root, target_lo=10000, target_hi=11000, protect_below=60, pas
         if target_lo <= cur <= target_hi:
             return cur
         if cur <= target_lo:
-            # Under budget: densify the largest parts until we clear the floor.
+            # Under budget. Prefer ANOTHER PANEL PASS over subdivision: insetting
+            # again turns each existing plate into a smaller plate with its own
+            # seam, so the triangles we add are relief the light can catch.
+            # Uniform subdivision just makes a denser copy of the same surface —
+            # the "smooth blob" outcome — so it is the last resort, used only
+            # when insetting can no longer close the gap.
             meshes.sort(key=lambda m: -tri_count(m))
-            for m in meshes[:max(1, len(meshes) // 3)]:
-                subdivide_mesh(m, cuts=1)
+            big = [m for m in meshes if tri_count(m) >= protect_below]
+            before = cur
+            for m in big[:max(1, len(big) // 2)]:
+                panel_inset(m, thickness=0.010, depth=-0.003)
                 if total_tris(root) > target_hi:
                     break
+            if total_tris(root) <= before * 1.02:
+                # Insetting stopped paying off (faces too small to inset again).
+                for m in meshes[:max(1, len(meshes) // 3)]:
+                    subdivide_mesh(m, cuts=1)
+                    if total_tris(root) > target_hi:
+                        break
             continue
         # Over budget: collapse proportionally, protecting the small detail bits.
         protected = sum(tri_count(m) for m in meshes if tri_count(m) < protect_below)

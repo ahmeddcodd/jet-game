@@ -2,7 +2,7 @@
 build_player_jet.py — detailed player fighter, built in Blender.
 Output: blender/player_jet.blend, public/assets/models/player_jet.glb
 
-Target: 10,000-11,000 triangles.
+Target: 40,000-41,000 triangles.
 
 The detail is *structural*, not subdivision: separate control surfaces, intake
 ducts, nozzle petals, cockpit interior, pylons and ordnance, antennae — then a
@@ -32,7 +32,7 @@ from bpy_helpers import (
     select_only, join_except, collect_meshes,
 )
 
-TRI_LO, TRI_HI = 20000, 21000
+TRI_LO, TRI_HI = 40000, 41000
 
 
 def build():
@@ -292,7 +292,7 @@ def build():
     # Detail pass, then land inside the triangle window
     # ------------------------------------------------------------------
     for obj in detail_targets:
-        detail_pass(obj)
+        detail_pass(obj, micro=0.006)
     bevel_edges(mid, width=0.02, segments=2)
     bevel_edges(fwd, width=0.02, segments=2)
 

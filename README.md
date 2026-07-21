@@ -200,18 +200,18 @@ Three.js is installed from npm (`three`) and bundled by Vite. The `.glb` models 
 
 ### Asset budget & LOD
 
-Every model is authored to **20,000–21,000 triangles** (`normalize_tris()` in `blender/bpy_helpers.py` enforces the window). Detail is structural, not smoothing — separate control surfaces, intake ducts, nozzle petals, cockpit interiors, pylons and ordnance, plus a **two-pass panel inset** that recesses each face and then subdivides those panels into individually seamed plates. The player jet authors ~48k triangles of real plating and is then decimated to budget, so the polygons are relief the key light can pick out rather than a denser approximation of the same shape.
+Every model is authored to **40,000–41,000 triangles** (`normalize_tris()` in `blender/bpy_helpers.py` enforces the window). Detail is structural, not smoothing — separate control surfaces, intake ducts, nozzle petals, cockpit interiors, pylons and ordnance, plus a **two-pass panel inset** that recesses each face and then subdivides those panels into individually seamed plates. The player jet authors ~158k triangles of real plating (the enemy jet ~209k) and is then decimated to budget, so the polygons are relief the key light can pick out rather than a denser approximation of the same shape.
 
 | Asset | LOD0 | LOD1 | LOD2 | LOD3 |
 |---|---|---|---|---|
-| player_jet / enemy_jet / helicopter / missile | ~20.5k | — | — | — |
-| tree | 20,494 | 5,718 | 1,515 | 412 |
-| rock | 20,496 | 5,730 | 1,518 | 406 |
-| cloud | 20,492 | 5,730 | 1,513 | 407 |
+| player_jet / enemy_jet / helicopter / missile | ~40.5k | — | — | — |
+| tree | 40,492 | 11,320 | 3,015 | 806 |
+| rock | 40,488 | 11,320 | 3,019 | 863 |
+| cloud | 40,486 | 11,324 | 3,026 | 805 |
 
-Trees, rocks and clouds are instanced **~246×** across the archipelago, so each ships a decimated LOD chain in the same `.glb`. `getLOD()` in `src/assets.js` reads the `<Name>_LOD0..3` nodes into a `THREE.LOD`; the renderer swaps levels itself. In flight most props sit at LOD2/LOD3 — measured at cruise: 151 at LOD3, 87 at LOD2, 11 at LOD1, none at LOD0. The whole scene renders at **183 draw calls / 210k triangles** cruising, **307 / 250k** low over the dense island cluster, and **100 / 255k** with fourteen enemies airborne. Without LOD the scenery alone would be 246 × 20,500 ≈ 5.0M triangles.
+Trees, rocks and clouds are instanced **~246×** across the archipelago, so each ships a decimated LOD chain in the same `.glb`. `getLOD()` in `src/assets.js` reads the `<Name>_LOD0..3` nodes into a `THREE.LOD`; the renderer swaps levels itself. In flight most props sit at LOD2/LOD3 — measured at cruise: 151 at LOD3, 87 at LOD2, 11 at LOD1, none at LOD0. The whole scene renders at **160 draw calls / 306k triangles** cruising, **249 / 390k** low over the dense island cluster, and **69 / 315k** with thirteen enemies airborne. Without LOD the scenery alone would be 252 × 40,500 ≈ 10.2M triangles.
 
-Two further things keep it cheap: each LOD level is **merged to a single multi-material mesh** in Blender (a 98-part airframe would otherwise be 98 draw calls, ×10 enemies), and clones **share geometry buffers** — 249 instances use 61 geometries. Models are **Draco-compressed** on export (8.4 MB → 1.4 MB), decoded by a locally bundled decoder in `public/draco/` (no CDN).
+Two further things keep it cheap: each LOD level is **merged to a single multi-material mesh** in Blender (a 98-part airframe would otherwise be 98 draw calls, ×10 enemies), and clones **share geometry buffers** — 249 instances use 61 geometries. Models are **Draco-compressed** on export (~26 MB → 4.6 MB), decoded by a locally bundled decoder in `public/draco/` (no CDN).
 
 ---
 

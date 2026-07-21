@@ -71,7 +71,7 @@ export function createOcean(scene) {
   // 212² quads ≈ 90k triangles, up from 80k. The waves are displaced in the
   // vertex shader with analytically derived normals, so a denser grid costs
   // only GPU vertex work — there is no per-frame CPU cost to raising this.
-  const segs = 212;
+  const segs = 236;
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 
@@ -239,8 +239,8 @@ function createIsland(cx, cz, radius, seed, propContainer) {
   // coastline instead of subdividing flat ground. The big island goes from
   // ~4.8k to ~14.4k triangles; small ones scale down, since a 70-unit islet
   // gains nothing from a 15k budget.
-  const rings = Math.round(clamp(radius / 8, 20, 52));
-  const sectors = Math.round(clamp(radius / 2.5, 60, 160));
+  const rings = Math.round(clamp(radius / 5.5, 28, 76));
+  const sectors = Math.round(clamp(radius / 1.7, 84, 232));
   const geo = makeDisc(radius, rings, sectors);
   const pos = geo.attributes.position;
 

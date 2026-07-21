@@ -2,7 +2,7 @@
 build_helicopter.py — detailed gunship helicopter, built in Blender.
 Output: blender/helicopter.blend, public/assets/models/helicopter.glb
 
-Target: 10,000-11,000 triangles.
+Target: 40,000-41,000 triangles.
 
 Runtime hooks: the game finds the Empties named "Rotor" and "TailRotor" and
 spins them. Everything that should rotate must be parented under those, and
@@ -24,7 +24,7 @@ from bpy_helpers import (
     select_only, join_meshes, join_except, collect_meshes,
 )
 
-TRI_LO, TRI_HI = 20000, 21000
+TRI_LO, TRI_HI = 40000, 41000
 
 
 def build(palette=None):
@@ -282,7 +282,7 @@ def build(palette=None):
 
     # ------------------------------------------------------------------
     for obj in detail_targets:
-        detail_pass(obj)
+        detail_pass(obj, micro=0.006)
     bevel_edges(body, width=0.022, segments=2)
 
     print("HELO_TRIS_PRE_NORMALIZE:", total_tris(root))
