@@ -466,6 +466,40 @@ def normalize_tris(root, target_lo=10000, target_hi=11000, protect_below=60, pas
 # LOD chain generation
 # ---------------------------------------------------------------------------
 
+def build_airframe_lods(root, airframe, ratios=(0.22,)):
+    # ONE level, deliberately. A second was tried at ratio 0.05 and came out
+    # with an identical triangle count to the first: collapse decimation cannot
+    # merge across disconnected components, and the panel-inset detail leaves
+    # thousands of isolated face islands, so ~20k is the irreducible floor for
+    # these hulls. The extra level was ~250 KB per aircraft of download for no
+    # reduction at all. Same root cause as the poor Draco ratio noted in
+    # export_glb — this topology is fragmented.
+    """Decimated copies of a merged airframe, as siblings named Airframe_LOD1/2.
+
+    Aircraft cannot use build_lod_chain: their animated parts — afterburner
+    flames, engine glows, nav lights, rotors — must stay outside the LOD so the
+    runtime can still find and drive them by name, and so they keep rendering at
+    any distance. So only the merged hull gets levels, and the hooks remain
+    independent children of the root.
+
+    Without this a 90k airframe is paid in full for every bandit on screen; a
+    dozen of them is over a million triangles for aircraft that may be a few
+    pixels across.
+    """
+    made = []
+    for level, ratio in enumerate(ratios, start=1):
+        dup = airframe.copy()
+        dup.data = airframe.data.copy()
+        dup.name = f"Airframe_LOD{level}"
+        bpy.context.collection.objects.link(dup)
+        dup.parent = airframe.parent
+        dup.matrix_parent_inverse = airframe.matrix_parent_inverse.copy()
+        _apply_decimate(dup, ratio)
+        flat_shade(dup)
+        made.append(dup)
+    return made
+
+
 def build_lod_chain(root, name, ratios=(0.28, 0.075, 0.02)):
     """Duplicate `root`'s meshes into progressively decimated LOD groups.
 

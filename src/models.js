@@ -19,9 +19,57 @@ function wrap(glbClone) {
   return wrapper;
 }
 
+// Switch distances for aircraft hulls. Generous compared with the scenery: an
+// aircraft is the thing you are looking at, and a bandit at 400 units is still
+// a meaningful silhouette, so the full hull is held well past the point where a
+// tree would have dropped.
+const AIRFRAME_LOD_DISTANCES = [0, 260, 700];
+
+/**
+ * Collapse "Airframe" / "Airframe_LOD1" / "Airframe_LOD2" into a THREE.LOD.
+ *
+ * The animated parts — flames, engine glows, nav lights, rotors — are left
+ * exactly where they are, as siblings outside the LOD, so the hooks the game
+ * looks up by name still resolve and still render at any range. Only the hull
+ * swaps. Without this every bandit on screen costs a full 90k-triangle hull no
+ * matter how far away it is.
+ */
+function applyAirframeLOD(root) {
+  // Match on the node, NOT on isMesh. A merged airframe carries one primitive
+  // per material, and GLTFLoader represents a multi-primitive mesh as a Group
+  // of Meshes — so the node called "Airframe" is a Group and an isMesh test
+  // silently finds nothing, leaving every aircraft at full detail.
+  const levels = [];
+  root.traverse((o) => {
+    if (!o.name) return;
+    const m = /^Airframe(?:_LOD(\d+))?$/.exec(o.name);
+    if (m) levels[m[1] ? Number(m[1]) : 0] = o;
+  });
+  if (levels.length < 2 || !levels[0]) return root;   // no chain baked in
+
+  const parent = levels[0].parent;
+  const lod = new THREE.LOD();
+  lod.position.copy(levels[0].position);
+  lod.quaternion.copy(levels[0].quaternion);
+  lod.scale.copy(levels[0].scale);
+
+  levels.forEach((mesh, i) => {
+    if (!mesh || !mesh.parent) return;
+    mesh.parent.remove(mesh);
+    // The LOD carries the transform now, so each level sits at its origin.
+    mesh.position.set(0, 0, 0);
+    mesh.quaternion.identity();
+    mesh.scale.set(1, 1, 1);
+    lod.addLevel(mesh, AIRFRAME_LOD_DISTANCES[i] ?? i * 400);
+  });
+  parent.add(lod);
+  return root;
+}
+
 /** Player jet — must call loadAll() first. */
 export function createPlayerJet() {
   const root = wrap(get('playerJet'));
+  applyAirframeLOD(root);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.afterburners = hooks.afterburners;
@@ -80,6 +128,7 @@ export function createPlayerJet() {
 /** Enemy jet — palette is baked into the glb; we just clone it. */
 export function createEnemyJet(_palette) {
   const root = wrap(get('enemyJet'));
+  applyAirframeLOD(root);
   cloneMaterials(root);            // per-instance so hit-flash doesn't bleed across enemies
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
@@ -90,6 +139,7 @@ export function createEnemyJet(_palette) {
 /** Helicopter — rotor hooks wired for per-frame spin. */
 export function createHelicopter(_palette) {
   const root = wrap(get('helicopter'));
+  applyAirframeLOD(root);
   cloneMaterials(root);            // per-instance emissive for hit-flash
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);

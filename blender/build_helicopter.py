@@ -2,7 +2,7 @@
 build_helicopter.py — detailed gunship helicopter, built in Blender.
 Output: blender/helicopter.blend, public/assets/models/helicopter.glb
 
-Target: 40,000-41,000 triangles.
+Target: 90,000-91,000 triangles.
 
 Runtime hooks: the game finds the Empties named "Rotor" and "TailRotor" and
 spins them. Everything that should rotate must be parented under those, and
@@ -21,10 +21,10 @@ from bpy_helpers import (
     reset_scene, mat, hex_to_rgb, cone, cylinder, cube, ico, uv_sphere,
     torus, group, empty, flat_shade, assign, save_blend, export_glb, TAU,
     panel_inset, detail_pass, bevel_edges, normalize_tris, total_tris, apply_scale,
-    select_only, join_meshes, join_except, collect_meshes,
+    tri_count, build_airframe_lods, select_only, join_meshes, join_except, collect_meshes,
 )
 
-TRI_LO, TRI_HI = 40000, 41000
+TRI_LO, TRI_HI = 90000, 91000
 
 
 def build(palette=None):
@@ -292,8 +292,14 @@ def build(palette=None):
     # rotors still animate as units while costing one draw call apiece.
     join_meshes(collect_meshes(rotor), "RotorMesh")
     join_meshes(collect_meshes(tail_rotor), "TailRotorMesh")
-    join_except(root, ("rotor", "nav"), "Airframe")
-    print("HELO_TRIS_FINAL:", total_tris(root), "meshes:", len(collect_meshes(root)))
+    _af = join_except(root, ("rotor", "nav"), "Airframe")
+    # Distant bandits must not cost a full 90k hull — see build_airframe_lods.
+    _lods = build_airframe_lods(root, _af)
+    # Report the HULL separately from its LOD copies: total_tris(root) now
+    # includes the decimated duplicates, which is not the model's poly count.
+    print("HELO_TRIS_FINAL:", tri_count(_af), "(hull LOD0)",
+          "lods:", [tri_count(o) for o in _lods],
+          "total:", total_tris(root), "meshes:", len(collect_meshes(root)))
 
     root.rotation_euler = (0, 0, math.radians(180))
     return root, final

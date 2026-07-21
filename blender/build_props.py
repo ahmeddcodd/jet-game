@@ -3,7 +3,7 @@ build_props.py — environment props + missile, built in Blender.
 Builds and exports: missile, tree, rock, cloud
 Output: blender/*.blend + public/assets/models/*.glb
 
-Target: 40,000-41,000 triangles for every LOD0.
+Target: 90,000-91,000 triangles for every LOD0.
 
 Trees, rocks and clouds are instanced ~225x across the archipelago, so each one
 also ships a decimated LOD1/LOD2/LOD3 chain in the same glb. The runtime reads
@@ -32,7 +32,7 @@ from bpy_helpers import (
 MODELS_DIR = os.path.join(HERE, "..", "public", "assets", "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-TRI_LO, TRI_HI = 40000, 41000
+TRI_LO, TRI_HI = 90000, 91000
 
 # LOD ratios relative to LOD0. Tuned so LOD2 (the level most scenery sits at
 # during normal flight) costs under a thousand triangles.
