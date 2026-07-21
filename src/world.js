@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { flatMat, enableShadow, mulberry32, rand, pick, clamp, smoothstep, TAU } from './utils.js';
 import { createCloud, createTree, createRock } from './models.js';
+import { applyDetailSurfacing } from './surfacing.js';
 
 const WORLD_RADIUS = 2600;     // outer play area radius (enforced softly)
 const SEA_LEVEL = 0;
@@ -300,6 +301,14 @@ function createIsland(cx, cz, radius, seed, propContainer) {
   // every hill into a mass of hard facets.
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true, flatShading: false, roughness: 0.95, metalness: 0,
+  });
+  // Ground grain. Scale is small because islands are 70-380 units across, so
+  // the pattern needs to repeat roughly every ten units to read as rock and
+  // soil rather than wallpaper. Uses the organic map set — the airframe's
+  // panel seams and fastener rows on a hillside would look absurd.
+  applyDetailSurfacing(mat, {
+    organic: true, scale: 0.09, normalStrength: 0.9,
+    roughAmount: 0.35, metalAmount: 0, aoAmount: 0.45,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;

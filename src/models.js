@@ -11,6 +11,7 @@
 // "orientation" without the glb's baked root rotation leaking in.
 import * as THREE from 'three';
 import { get, getLOD, collectAircraftHooks, setupShadows, cloneMaterials } from './assets.js';
+import { surfaceAll } from './surfacing.js';
 
 /** Wrap a glb clone in an identity-transform group. */
 function wrap(glbClone) {
@@ -24,6 +25,14 @@ function wrap(glbClone) {
 // a meaningful silhouette, so the full hull is held well past the point where a
 // tree would have dropped.
 const AIRFRAME_LOD_DISTANCES = [0, 260, 700];
+
+// Surfacing presets, in OBJECT units. Aircraft get a tight panel pitch and a
+// little paint-wear metalness on raised areas; scenery gets a coarser, purely
+// organic treatment with no metal at all.
+const AIRCRAFT_SURFACE = { scale: 0.9, normalStrength: 0.85, roughAmount: 0.5,
+                           metalAmount: 0.35, aoAmount: 0.55 };
+const PROP_SURFACE     = { scale: 0.35, normalStrength: 0.7, roughAmount: 0.55,
+                           metalAmount: 0.0, aoAmount: 0.5 };
 
 /**
  * Collapse "Airframe" / "Airframe_LOD1" / "Airframe_LOD2" into a THREE.LOD.
@@ -70,6 +79,7 @@ function applyAirframeLOD(root) {
 export function createPlayerJet() {
   const root = wrap(get('playerJet'));
   applyAirframeLOD(root);
+  surfaceAll(root, AIRCRAFT_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.afterburners = hooks.afterburners;
@@ -129,7 +139,8 @@ export function createPlayerJet() {
 export function createEnemyJet(_palette) {
   const root = wrap(get('enemyJet'));
   applyAirframeLOD(root);
-  cloneMaterials(root);            // per-instance so hit-flash doesn't bleed across enemies
+  cloneMaterials(root);   // per-instance first: Material.copy() drops onBeforeCompile
+  surfaceAll(root, AIRCRAFT_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.engineGlows = hooks.engineGlows;
@@ -140,7 +151,8 @@ export function createEnemyJet(_palette) {
 export function createHelicopter(_palette) {
   const root = wrap(get('helicopter'));
   applyAirframeLOD(root);
-  cloneMaterials(root);            // per-instance emissive for hit-flash
+  cloneMaterials(root);   // per-instance first: Material.copy() drops onBeforeCompile
+  surfaceAll(root, AIRCRAFT_SURFACE);
   setupShadows(root, true, false);
   const hooks = collectAircraftHooks(root);
   root.userData.rotor = hooks.rotor;
@@ -151,6 +163,7 @@ export function createHelicopter(_palette) {
 /** Missile (player) — loaded as a glb. */
 export function createMissile() {
   const root = wrap(get('missile'));
+  surfaceAll(root, AIRCRAFT_SURFACE);
   setupShadows(root, false, false);
   return root;
 }
@@ -162,8 +175,12 @@ export function createMissile() {
 // is only ever paid for on the few props near the camera; the rest run at
 // ~760 or ~200 triangles.
 function prop(name) {
-  const lod = getLOD(name);
-  return lod || wrap(get(name));   // fall back if a glb ships without a chain
+  const lod = getLOD(name) || wrap(get(name));   // fall back if no chain baked in
+  // Only the highest level is worth surfacing — below it the object is a few
+  // pixels across and the shader work would buy nothing.
+  if (lod.isLOD && lod.levels.length) surfaceAll(lod.levels[0].object, PROP_SURFACE);
+  else surfaceAll(lod, PROP_SURFACE);
+  return lod;
 }
 
 export function createCloud(_rng, _scale) {

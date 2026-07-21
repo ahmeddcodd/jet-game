@@ -8,6 +8,7 @@ import { AudioEngine } from './audio.js';
 import { ParticleField } from './particles.js';
 import { EnemyJet, EnemyHelo, Bullet, Missile, Flare, MISSILE } from './enemies.js';
 import { TargetingComputer, LOCK_STATE } from './targeting.js';
+import { makeSkyEnvironment } from './surfacing.js';
 import { loadAll, loadStatus } from './assets.js';
 import { clamp, rand, randInt, tmp } from './utils.js';
 
@@ -39,6 +40,12 @@ renderer.toneMappingExposure = 1.25;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+// Environment reflections. Every MeshStandardMaterial in the scene picks this
+// up automatically, which is what finally lets metalness mean something — a
+// metal surface is almost entirely reflection, and until now there was nothing
+// to reflect, so raising metalness only darkened the material.
+scene.environment = makeSkyEnvironment(renderer);
+scene.environmentIntensity = 0.85;
 // near=0.5 gave a 16000:1 depth range for no benefit — the camera never gets
 // closer than ~12 units to anything. 2.0 reclaims two orders of magnitude of
 // precision while staying far inside the chase distance.
