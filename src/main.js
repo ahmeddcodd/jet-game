@@ -226,6 +226,7 @@ const _tactical = [];
  * camera lives; the HUD just draws what it is handed.
  */
 function updateTactical(dt) {
+  hud.syncTacticalSize();
   const w = window.innerWidth, h = window.innerHeight;
   _tactical.length = 0;
   _camFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);

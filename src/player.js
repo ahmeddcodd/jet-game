@@ -12,6 +12,12 @@ const _p2 = new THREE.Vector3();
 const _p3 = new THREE.Vector3();
 const _a1 = new THREE.Vector3();
 const _a2 = new THREE.Vector3();
+// Camera-only scratch. _updateCamera holds `fwd`/`up`/`desired` in tmp.v1-v3
+// across the whole function, so anything else in there needs its own storage —
+// reusing tmp.v1 for a guard silently corrupted the forward vector that the
+// final lookAt depends on.
+const _camGap = new THREE.Vector3();
+const _camOff = new THREE.Vector3();
 const _e1 = new THREE.Euler(0, 0, 0, 'YXZ');
 const _dq = new THREE.Quaternion();
 const _axis = new THREE.Vector3();
@@ -574,18 +580,31 @@ export class Player {
     const follow = 7.0 - speedT * 2.2;
     cam.position.lerp(desired, 1 - Math.exp(-follow * dt));
 
-    // Hard maneuvering swings the desired position around fast enough that the
-    // damped rig can end up almost on top of the jet — measured at 4 units
-    // during a loop, well inside the ~10-unit airframe, so the camera clips
-    // through the model. Push it back out along the jet-to-camera line.
-    const MIN_DIST = 8.5;
-    const gap = tmp.v1.copy(cam.position).sub(this.mesh.position);
-    const gapLen = gap.length();
-    if (gapLen < MIN_DIST) {
-      // Degenerate case: if the camera is exactly on the jet, fall back to
-      // straight behind rather than normalising a zero-length vector.
-      if (gapLen < 1e-3) gap.copy(fwd).multiplyScalar(-1);
-      cam.position.copy(this.mesh.position).addScaledVector(gap.normalize(), MIN_DIST);
+    // Keep the rig behind the jet and clear of the airframe.
+    //
+    // Both guards below correct along the DESIRED offset direction, never the
+    // camera's current one. Clamping along the current direction is a trap: if
+    // the rig ever drifts in front of the jet, the clamp pins it out there and
+    // re-pins it every frame, while the damped follow can only claw back a few
+    // percent per frame — so it stays stuck ahead, looking away, and the jet is
+    // never on screen.
+    _camOff.copy(desired).sub(this.mesh.position);
+    if (_camOff.lengthSq() < 1e-6) _camOff.copy(fwd).multiplyScalar(-dist);
+    _camOff.normalize();
+
+    _camGap.copy(cam.position).sub(this.mesh.position);
+
+    // Hemisphere guard — the camera must never be in front of the nose.
+    if (_camGap.dot(fwd) > 0) {
+      cam.position.copy(desired);
+      _camGap.copy(desired).sub(this.mesh.position);
+    }
+
+    // Minimum standoff, so the rig cannot end up inside the ~12-unit airframe
+    // (or inside the near plane) during hard maneuvering.
+    const MIN_DIST = 10.0;
+    if (_camGap.lengthSq() < MIN_DIST * MIN_DIST) {
+      cam.position.copy(this.mesh.position).addScaledVector(_camOff, MIN_DIST);
     }
 
     const targetFov = 62 + speedT * 16 + (this.boostActive ? 9 : 0);

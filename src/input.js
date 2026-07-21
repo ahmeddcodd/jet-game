@@ -73,7 +73,10 @@ export class Input {
     });
 
     document.addEventListener('mousedown', (e) => {
-      if (!this.pointerLocked) return;
+      // Deliberately NOT gated on pointer lock. Steering needs the lock, but
+      // firing should not: if the lock is refused or dropped (Esc, focus loss,
+      // an embedded frame) the player could still fly with the keyboard yet had
+      // no way to shoot at all, which reads as the guns being broken.
       if (e.button === 0) this.mouseDown = true;
       if (e.button === 2) this.mouseDown2 = true;
     });

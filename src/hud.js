@@ -124,11 +124,26 @@ export class HUD {
   /** Match the tactical overlay to the drawing buffer, accounting for DPR. */
   resizeTactical(w, h, dpr = Math.min(window.devicePixelRatio, 2)) {
     if (!this.tacticalCanvas) return;
-    this.tacticalCanvas.width = Math.round(w * dpr);
-    this.tacticalCanvas.height = Math.round(h * dpr);
+    const cw = Math.round(w * dpr), ch = Math.round(h * dpr);
+    if (this.tacticalCanvas.width === cw && this.tacticalCanvas.height === ch) return;
+    this.tacticalCanvas.width = cw;
+    this.tacticalCanvas.height = ch;
     this.tacticalCanvas.style.width = `${w}px`;
     this.tacticalCanvas.style.height = `${h}px`;
     this._dpr = dpr;
+  }
+
+  /**
+   * Re-sync the overlay to the viewport if they have diverged.
+   *
+   * The canvas is stretched to the viewport by CSS but keeps its own pixel
+   * grid, so if a resize is ever missed the overlay silently draws into the
+   * wrong coordinate space — target boxes, lock reticle and stick indicator all
+   * land in the wrong place. Cheap to check every frame; the setter above
+   * no-ops unless the size actually changed.
+   */
+  syncTacticalSize() {
+    this.resizeTactical(window.innerWidth, window.innerHeight);
   }
 
   /**
@@ -319,7 +334,10 @@ export class HUD {
     const dpr = this._dpr || 1;
     const w = this.tacticalCanvas.width / dpr;
     const h = this.tacticalCanvas.height / dpr;
-    const cx = w / 2, cy = h / 2 + 96;
+    // Bottom-centre. Sitting just under the crosshair put this squarely on top
+    // of the aircraft; down here it is still glanceable without occluding it,
+    // and it reads naturally as a stick position.
+    const cx = w / 2, cy = h - 58;
     const R = 26;
 
     ctx.save();

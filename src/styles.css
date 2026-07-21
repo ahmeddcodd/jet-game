@@ -177,9 +177,10 @@ canvas{display:block;}
 .bar-fill.boost{background:linear-gradient(90deg,#ffcf5b,#ff8a5b);width:100%;}
 
 /* Weapons (bottom-right) */
+/* Status readouts sit top-right, clear of both the aircraft and the radar. */
 #weapons{
-  position:absolute;bottom:24px;right:24px;
-  display:flex;flex-direction:column;gap:10px;text-align:right;
+  position:absolute;top:18px;right:24px;
+  display:flex;flex-direction:column;gap:8px;text-align:right;
 }
 .weapon{
   background:var(--hud-bg);border:1px solid var(--hud-dim);
@@ -189,9 +190,11 @@ canvas{display:block;}
 .wk{font-size:10px;letter-spacing:2px;color:var(--hud-dim);}
 .weapon span:last-child{font-size:18px;color:var(--hud);font-weight:bold;}
 
-/* Radar */
+/* Radar — bottom RIGHT. It used to be bottom-centre, which parked a 180px
+   disc directly beneath the jet: the busiest part of the screen and exactly
+   where you look during a gun pass. Corners keep the centre clear. */
 #radar{
-  position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+  position:absolute;bottom:24px;right:24px;
   text-align:center;
 }
 #radar-canvas{
