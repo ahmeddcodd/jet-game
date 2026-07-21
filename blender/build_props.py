@@ -25,14 +25,14 @@ if HERE not in sys.path:
 from bpy_helpers import (
     reset_scene, mat, hex_to_rgb, cone, cylinder, cube, ico, uv_sphere, torus,
     group, flat_shade, assign, save_blend, export_glb, TAU,
-    panel_inset, normalize_tris, total_tris, apply_scale, build_lod_chain,
+    panel_inset, detail_pass, normalize_tris, total_tris, apply_scale, build_lod_chain,
     subdivide_mesh, collect_meshes, join_meshes, join_except,
 )
 
 MODELS_DIR = os.path.join(HERE, "..", "public", "assets", "models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-TRI_LO, TRI_HI = 10000, 11000
+TRI_LO, TRI_HI = 20000, 21000
 
 # LOD ratios relative to LOD0. Tuned so LOD2 (the level most scenery sits at
 # during normal flight) costs under a thousand triangles.
@@ -149,7 +149,7 @@ def build_missile():
                   material=m_glow))
 
     for o in detail:
-        panel_inset(o, thickness=0.012, depth=-0.004)
+        detail_pass(o, coarse=0.014, fine=0.006, bevel=0.003)
 
     final = normalize_tris(root, TRI_LO, TRI_HI)
     join_except(root, ("glow",), "MissileBody")

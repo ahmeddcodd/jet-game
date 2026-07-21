@@ -20,11 +20,11 @@ if HERE not in sys.path:
 from bpy_helpers import (
     reset_scene, mat, hex_to_rgb, cone, cylinder, cube, ico, uv_sphere,
     torus, group, empty, flat_shade, assign, save_blend, export_glb, TAU,
-    panel_inset, bevel_edges, normalize_tris, total_tris, apply_scale,
+    panel_inset, detail_pass, bevel_edges, normalize_tris, total_tris, apply_scale,
     select_only, join_meshes, join_except, collect_meshes,
 )
 
-TRI_LO, TRI_HI = 10000, 11000
+TRI_LO, TRI_HI = 20000, 21000
 
 
 def build(palette=None):
@@ -282,7 +282,7 @@ def build(palette=None):
 
     # ------------------------------------------------------------------
     for obj in detail_targets:
-        panel_inset(obj, thickness=0.030, depth=-0.012)
+        detail_pass(obj)
     bevel_edges(body, width=0.022, segments=2)
 
     print("HELO_TRIS_PRE_NORMALIZE:", total_tris(root))

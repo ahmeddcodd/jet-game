@@ -289,6 +289,23 @@ def _bmesh_back(bm, obj):
     obj.data.update()
 
 
+def detail_pass(obj, coarse=0.030, fine=0.012, bevel=0.006):
+    """Two nested panel-line passes plus an edge bevel.
+
+    A single inset gives one recessed panel per face. Insetting the *result*
+    again subdivides each of those panels into a plate with its own seam, which
+    is what real hard-surface plating looks like — and it roughly doubles the
+    face count while every added triangle is doing visible work. This is how the
+    models reach a 20k budget without simply being smoothed blobs: the polygons
+    become plating and relief, not denser approximations of the same shape.
+    """
+    panel_inset(obj, thickness=coarse, depth=-coarse * 0.4)
+    panel_inset(obj, thickness=fine, depth=-fine * 0.35)
+    if bevel:
+        bevel_edges(obj, width=bevel, segments=2)
+    return obj
+
+
 def panel_inset(obj, thickness=0.012, depth=-0.004, faces_filter=None, max_faces=None):
     """Inset every face slightly and push it in, creating recessed panel lines.
 

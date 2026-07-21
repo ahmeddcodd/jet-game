@@ -68,7 +68,10 @@ export function createSky(scene) {
    ============================================================ */
 export function createOcean(scene) {
   const size = 12000;
-  const segs = 200;
+  // 212² quads ≈ 90k triangles, up from 80k. The waves are displaced in the
+  // vertex shader with analytically derived normals, so a denser grid costs
+  // only GPU vertex work — there is no per-frame CPU cost to raising this.
+  const segs = 212;
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
   geo.rotateX(-Math.PI / 2);
 
@@ -230,8 +233,14 @@ function createIsland(cx, cz, radius, seed, propContainer) {
   // straight edge between centre and coast — the heightfield below had nothing
   // to displace and every island came out a faceted cone. This gives real
   // interior vertices for the FBM to sculpt.
-  const rings = Math.round(clamp(radius / 13, 12, 34));
-  const sectors = Math.round(clamp(radius / 4.5, 36, 104));
+  // Roughly 3x the previous resolution. Terrain is where extra polygons buy
+  // the most realism: the FBM heightfield already describes far more shape than
+  // the old grid could sample, so the added vertices resolve real hills and
+  // coastline instead of subdividing flat ground. The big island goes from
+  // ~4.8k to ~14.4k triangles; small ones scale down, since a 70-unit islet
+  // gains nothing from a 15k budget.
+  const rings = Math.round(clamp(radius / 8, 20, 52));
+  const sectors = Math.round(clamp(radius / 2.5, 60, 160));
   const geo = makeDisc(radius, rings, sectors);
   const pos = geo.attributes.position;
 
