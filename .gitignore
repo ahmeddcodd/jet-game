@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vite/
+*.log
+
+# Blender build artifacts (the .glb outputs in public/assets are committed)
+blender/*.blend1
+blender/__pycache__/

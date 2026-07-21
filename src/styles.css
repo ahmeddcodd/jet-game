@@ -1,0 +1,304 @@
+:root{
+  --hud:#7fffd4;
+  --hud-dim:rgba(127,255,212,.45);
+  --hud-bg:rgba(4,12,16,.35);
+  --danger:#ff5b5b;
+  --amber:#ffcf5b;
+  --ink:#d6fff2;
+  --font:'Courier New',ui-monospace,monospace;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;height:100%;overflow:hidden;background:#02060a;}
+body{
+  font-family:var(--font);
+  color:var(--ink);
+  user-select:none;
+  cursor:default;
+}
+canvas{display:block;}
+
+#app{position:fixed;inset:0;}
+
+.hidden{display:none !important;}
+
+/* ---------- HUD ---------- */
+#hud{
+  position:fixed;inset:0;pointer-events:none;
+  font-family:var(--font);
+  text-shadow:0 0 6px rgba(0,0,0,.6);
+}
+
+/* BFM maneuver list on the start card */
+.bfm{
+  margin-top:14px;padding-top:12px;
+  border-top:1px solid rgba(127,255,212,.18);
+}
+.bfm-title{
+  font-size:11px;letter-spacing:.18em;opacity:.55;
+  margin-bottom:8px;
+}
+.bfm .ctrl{font-size:12px;}
+
+/* Tactical overlay — target boxes, lead reticle, off-screen arrows.
+   Sits under the crosshair and text so it never obscures the pipper. */
+#tactical-canvas{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  pointer-events:none;
+}
+
+/* Rear-threat warning — someone is on your six */
+#threat-warn{
+  position:absolute;left:50%;top:16%;
+  transform:translate(-50%,-6px);
+  padding:6px 16px;
+  font-size:15px;font-weight:800;letter-spacing:.16em;
+  color:#fff;background:rgba(190,26,26,.82);
+  border:1px solid rgba(255,120,120,.85);
+  border-radius:4px;
+  box-shadow:0 0 22px rgba(255,50,50,.6);
+  opacity:0;transition:opacity .16s ease,transform .16s ease;
+}
+#threat-warn.show{
+  opacity:1;transform:translate(-50%,0);
+  animation:threatPulse .62s ease-in-out infinite;
+}
+@keyframes threatPulse{
+  0%,100%{box-shadow:0 0 18px rgba(255,50,50,.45);}
+  50%    {box-shadow:0 0 34px rgba(255,60,60,.95);}
+}
+
+/* Missile inbound — louder than the rear-threat warning, it's more urgent */
+#missile-warn{
+  position:absolute;left:50%;top:24%;
+  transform:translate(-50%,-6px);
+  padding:8px 20px;
+  font-size:17px;font-weight:900;letter-spacing:.14em;
+  color:#fff;background:rgba(210,20,20,.9);
+  border:2px solid rgba(255,140,140,.95);
+  border-radius:4px;
+  opacity:0;transition:opacity .12s ease;
+}
+#missile-warn.show{opacity:1;animation:missileFlash .32s steps(2,end) infinite;}
+@keyframes missileFlash{
+  0%,100%{background:rgba(210,20,20,.9);}
+  50%    {background:rgba(255,90,40,.95);}
+}
+
+/* Floating score popups on kills */
+.float-score{
+  position:absolute;top:44%;
+  transform:translateX(-50%);
+  font-size:20px;font-weight:800;letter-spacing:.05em;
+  color:#7fffd4;text-shadow:0 0 10px rgba(0,0,0,.85);
+  pointer-events:none;
+  animation:floatUp 1.15s cubic-bezier(.2,.7,.3,1) forwards;
+}
+.float-score.big{font-size:28px;color:#ffe066;}
+@keyframes floatUp{
+  0%  {opacity:0;transform:translate(-50%,10px) scale(.8);}
+  18% {opacity:1;transform:translate(-50%,0) scale(1.08);}
+  100%{opacity:0;transform:translate(-50%,-58px) scale(1);}
+}
+
+/* Critical hull — pulsing edge vignette */
+#hud.critical::after{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  box-shadow:inset 0 0 140px rgba(220,20,20,.55);
+  animation:critPulse 1.05s ease-in-out infinite;
+}
+@keyframes critPulse{
+  0%,100%{box-shadow:inset 0 0 110px rgba(220,20,20,.38);}
+  50%    {box-shadow:inset 0 0 180px rgba(255,40,40,.72);}
+}
+
+/* Closure readout */
+#closure.closing{color:#ff8a5b;}
+#closure.opening{color:#7fb0ff;}
+
+/* Radar lock state */
+#lock-state.searching{color:var(--hud);opacity:.6;}
+#lock-state.acquiring{color:#ffd250;}
+#lock-state.locked{color:#ff3b3b;font-weight:800;}
+
+/* Countermeasures + G load */
+#flare-count.low{color:#ffcf5b;}
+#flare-count.empty{color:#ff5b5b;opacity:.7;}
+#g-meter.mid{color:#ffcf5b;}
+#g-meter.high{color:#ff5b5b;font-weight:800;}
+
+/* Crosshair */
+#crosshair{
+  position:absolute;top:50%;left:50%;
+  width:60px;height:60px;
+  transform:translate(-50%,-50%);
+}
+#crosshair .ch{position:absolute;background:var(--hud);box-shadow:0 0 6px var(--hud);}
+.ch-t,.ch-b{left:50%;width:2px;height:10px;transform:translateX(-50%);}
+.ch-t{top:0;}.ch-b{bottom:0;}
+.ch-l,.ch-r{top:50%;width:10px;height:2px;transform:translateY(-50%);}
+.ch-l{left:0;}.ch-r{right:0;}
+.ch-dot{
+  position:absolute;top:50%;left:50%;width:3px;height:3px;
+  background:var(--hud);border-radius:50%;transform:translate(-50%,-50%);
+  box-shadow:0 0 8px var(--hud);
+}
+
+/* Top bar */
+#topbar{
+  position:absolute;top:18px;left:50%;transform:translateX(-50%);
+  display:flex;gap:42px;
+  background:var(--hud-bg);
+  border:1px solid var(--hud-dim);
+  padding:8px 28px;border-radius:4px;
+  backdrop-filter:blur(2px);
+}
+.stat{display:flex;flex-direction:column;align-items:center;gap:2px;}
+.stat-k{font-size:10px;letter-spacing:3px;color:var(--hud-dim);}
+.stat span:last-child{font-size:20px;color:var(--hud);font-weight:bold;}
+
+/* Vitals (bottom-left) */
+#vitals{
+  position:absolute;bottom:24px;left:24px;
+  display:flex;flex-direction:column;gap:10px;
+  width:230px;
+}
+.gauge-label{
+  font-size:9px;letter-spacing:2px;color:var(--hud-dim);margin-bottom:3px;
+}
+.bar{
+  height:10px;background:var(--hud-bg);
+  border:1px solid var(--hud-dim);border-radius:2px;overflow:hidden;
+}
+.bar-fill{height:100%;transition:width .15s linear;}
+.bar-fill.health{background:linear-gradient(90deg,#3affb0,#7fffd4);width:100%;}
+.bar-fill.throttle{background:linear-gradient(90deg,#5b8cff,#9bb0ff);width:55%;}
+.bar-fill.boost{background:linear-gradient(90deg,#ffcf5b,#ff8a5b);width:100%;}
+
+/* Weapons (bottom-right) */
+#weapons{
+  position:absolute;bottom:24px;right:24px;
+  display:flex;flex-direction:column;gap:10px;text-align:right;
+}
+.weapon{
+  background:var(--hud-bg);border:1px solid var(--hud-dim);
+  padding:6px 14px;border-radius:4px;min-width:120px;
+  display:flex;justify-content:space-between;gap:16px;align-items:center;
+}
+.wk{font-size:10px;letter-spacing:2px;color:var(--hud-dim);}
+.weapon span:last-child{font-size:18px;color:var(--hud);font-weight:bold;}
+
+/* Radar */
+#radar{
+  position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+  text-align:center;
+}
+#radar-canvas{
+  background:radial-gradient(circle,rgba(10,30,28,.7),rgba(2,10,12,.85));
+  border:1px solid var(--hud-dim);border-radius:50%;
+  box-shadow:0 0 22px rgba(127,255,212,.18) inset;
+}
+.radar-label{font-size:10px;letter-spacing:3px;color:var(--hud-dim);margin-top:4px;}
+
+/* Center message (wave announce) */
+#center-msg{
+  position:absolute;top:24%;left:50%;transform:translateX(-50%);
+  font-size:30px;letter-spacing:6px;color:var(--hud);
+  text-align:center;opacity:0;transition:opacity .4s;
+  text-shadow:0 0 18px var(--hud);
+}
+#center-msg.show{opacity:1;}
+#center-msg .sub{display:block;font-size:14px;letter-spacing:3px;color:var(--ink);margin-top:6px;}
+
+/* Hit marker */
+#hitmarker{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%) scale(1.6);
+  color:var(--danger);font-size:26px;font-weight:bold;
+  text-shadow:0 0 8px var(--danger);
+}
+#hitmarker.show{animation:hit .25s ease-out;}
+@keyframes hit{0%{opacity:1;transform:translate(-50%,-50%) scale(2);}100%{opacity:0;transform:translate(-50%,-50%) scale(1);}}
+
+/* Damage flash */
+#damage-flash{
+  position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(circle,transparent 40%,rgba(255,40,40,.45) 100%);
+  opacity:0;transition:opacity .25s;z-index:5;
+}
+
+/* ---------- Overlays ---------- */
+.overlay{
+  position:fixed;inset:0;z-index:10;
+  display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 50% 40%,rgba(8,20,28,.85),rgba(1,4,8,.96));
+  backdrop-filter:blur(3px);
+}
+.menu-card{
+  text-align:center;padding:48px 60px;
+  border:1px solid var(--hud-dim);
+  background:rgba(6,16,20,.6);
+  border-radius:8px;
+  box-shadow:0 0 60px rgba(127,255,212,.12);
+  max-width:520px;
+}
+.menu-card h1{
+  font-size:54px;letter-spacing:6px;color:var(--ink);
+  text-shadow:0 0 20px var(--hud);
+}
+.menu-card h1 span{color:var(--hud);}
+.menu-card h2{font-size:38px;letter-spacing:6px;color:var(--hud);margin-bottom:18px;}
+.tag{color:var(--hud-dim);letter-spacing:3px;margin:6px 0 28px;font-size:13px;}
+
+.controls{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px 22px;
+  text-align:left;margin-bottom:30px;font-size:13px;color:var(--ink);
+}
+.ctrl{display:flex;align-items:center;gap:8px;}
+kbd{
+  display:inline-block;padding:3px 8px;font-size:11px;
+  background:rgba(127,255,212,.1);border:1px solid var(--hud-dim);
+  border-radius:3px;color:var(--hud);font-family:var(--font);
+}
+
+button{
+  pointer-events:auto;cursor:pointer;
+  font-family:var(--font);font-size:18px;letter-spacing:4px;
+  padding:14px 42px;color:#02060a;
+  background:linear-gradient(180deg,#7fffd4,#3affb0);
+  border:none;border-radius:4px;font-weight:bold;
+  box-shadow:0 0 24px rgba(127,255,212,.4);
+  transition:transform .1s,box-shadow .2s,filter .2s;
+}
+button:hover{transform:translateY(-2px);box-shadow:0 0 36px rgba(127,255,212,.6);filter:brightness(1.08);}
+button:active{transform:translateY(0);}
+button.ghost{
+  background:transparent;color:var(--hud);
+  border:1px solid var(--hud-dim);box-shadow:none;margin-top:12px;
+}
+button.ghost:hover{background:rgba(127,255,212,.08);}
+
+.hint{color:var(--hud-dim);font-size:11px;margin-top:18px;letter-spacing:2px;}
+
+.result{margin:24px 0 30px;display:flex;flex-direction:column;gap:10px;}
+.res-row{
+  display:flex;justify-content:space-between;
+  border-bottom:1px dashed var(--hud-dim);padding-bottom:8px;
+}
+.res-row span{color:var(--hud-dim);letter-spacing:2px;font-size:13px;}
+.res-row b{color:var(--hud);font-size:20px;}
+
+/* Loading */
+#loading{
+  position:fixed;inset:0;z-index:20;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:22px;background:#02060a;color:var(--hud-dim);letter-spacing:4px;
+}
+.spinner{
+  width:46px;height:46px;border-radius:50%;
+  border:3px solid rgba(127,255,212,.15);
+  border-top-color:var(--hud);
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}

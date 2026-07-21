@@ -1,0 +1,31 @@
+{
+  "name": "skybreaker",
+  "version": "1.0.0",
+  "description": "SKYBREAKER — a low-poly jet combat shooter built with Vite + Three.js. All 3D assets authored in Blender, exported to glb, and loaded at runtime.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:assets": "blender\\build_all.bat"
+  },
+  "keywords": [
+    "threejs",
+    "vite",
+    "game",
+    "blender",
+    "low-poly",
+    "jet"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "three": "^0.160.1"
+  },
+  "devDependencies": {
+    "vite": "^8.1.5"
+  }
+}

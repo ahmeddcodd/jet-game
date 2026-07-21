@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SKYBREAKER — Low Poly Jet Combat</title>
+<link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <!-- 3D canvas mount -->
+  <div id="app"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <!-- Tactical overlay: target boxes, lead reticle, off-screen arrows -->
+    <canvas id="tactical-canvas"></canvas>
+
+    <!-- Rear-threat warning -->
+    <div id="threat-warn">⚠ THREAT</div>
+
+    <!-- Missile inbound warning -->
+    <div id="missile-warn">◆ MISSILE — SPACE FOR FLARES</div>
+
+    <!-- Crosshair -->
+    <div id="crosshair">
+      <div class="ch ch-t"></div><div class="ch ch-b"></div>
+      <div class="ch ch-l"></div><div class="ch ch-r"></div>
+      <div class="ch-dot"></div>
+    </div>
+
+    <!-- Top bar: score + wave -->
+    <div id="topbar">
+      <div class="stat"><span class="stat-k">SCORE</span><span id="score">0</span></div>
+      <div class="stat"><span class="stat-k">WAVE</span><span id="wave">1</span></div>
+      <div class="stat"><span class="stat-k">KILLS</span><span id="kills">0</span></div>
+    </div>
+
+    <!-- Bottom-left: health + throttle -->
+    <div id="vitals">
+      <div class="gauge">
+        <div class="gauge-label">HULL</div>
+        <div class="bar"><div id="health-fill" class="bar-fill health"></div></div>
+      </div>
+      <div class="gauge">
+        <div class="gauge-label">THRUST</div>
+        <div class="bar"><div id="throttle-fill" class="bar-fill throttle"></div></div>
+      </div>
+      <div class="gauge">
+        <div class="gauge-label">AFTERBURNER</div>
+        <div class="bar"><div id="boost-fill" class="bar-fill boost"></div></div>
+      </div>
+    </div>
+
+    <!-- Bottom-right: weapons -->
+    <div id="weapons">
+      <div class="weapon"><span class="wk">GUN</span><span id="gun-ammo">∞</span></div>
+      <div class="weapon"><span class="wk">MSL</span><span id="missile-ammo">6</span></div>
+      <div class="weapon"><span class="wk">FLARE</span><span id="flare-count">12</span></div>
+      <div class="weapon"><span class="wk">RADAR</span><span id="lock-state">SEARCH</span></div>
+      <div class="weapon"><span class="wk">CLOSURE</span><span id="closure">—</span></div>
+      <div class="weapon"><span class="wk">LOAD</span><span id="g-meter">1.0G</span></div>
+    </div>
+
+    <!-- Radar -->
+    <div id="radar">
+      <canvas id="radar-canvas" width="180" height="180"></canvas>
+      <div class="radar-label">RADAR</div>
+    </div>
+
+    <!-- Center messages (wave announce, hit markers) -->
+    <div id="center-msg"></div>
+    <!-- Hit marker -->
+    <div id="hitmarker" class="hidden">×</div>
+  </div>
+
+  <!-- Start screen -->
+  <div id="menu" class="overlay">
+    <div class="menu-card">
+      <h1>SKY<span>BREAKER</span></h1>
+      <p class="tag">A low-poly jet combat shooter</p>
+      <div class="controls">
+        <div class="ctrl"><kbd>MOUSE</kbd> Steer — banks &amp; turns</div>
+        <div class="ctrl"><kbd>ARROWS</kbd> Steer (keyboard)</div>
+        <div class="ctrl"><kbd>A</kbd> / <kbd>D</kbd> Free roll</div>
+        <div class="ctrl"><kbd>Q</kbd> / <kbd>E</kbd> Rudder</div>
+        <div class="ctrl"><kbd>W</kbd> / <kbd>S</kbd> Throttle</div>
+        <div class="ctrl"><kbd>SHIFT</kbd> Afterburner</div>
+        <div class="ctrl"><kbd>L-CLICK</kbd> Cannon</div>
+        <div class="ctrl"><kbd>R-CLICK</kbd> / <kbd>F</kbd> Missile</div>
+        <div class="ctrl"><kbd>R</kbd> Lock target</div>
+        <div class="ctrl"><kbd>TAB</kbd> Cycle targets</div>
+        <div class="ctrl"><kbd>SPACE</kbd> Flares</div>
+        <div class="ctrl"><kbd>P</kbd> / <kbd>ESC</kbd> Pause</div>
+      </div>
+      <div class="bfm">
+        <div class="bfm-title">DOGFIGHT MANEUVERS</div>
+        <div class="ctrl"><kbd>Z</kbd> Split-S — reverse, trade height for speed</div>
+        <div class="ctrl"><kbd>X</kbd> Immelmann — reverse, climb (needs energy)</div>
+        <div class="ctrl"><kbd>C</kbd> Barrel roll — force an overshoot</div>
+        <div class="ctrl"><kbd>V</kbd> Break turn — max-G defensive</div>
+      </div>
+      <button id="start-btn">DEPLOY</button>
+      <p class="hint">Click DEPLOY to lock your mouse and fly.</p>
+    </div>
+  </div>
+
+  <!-- Pause screen -->
+  <div id="pause" class="overlay hidden">
+    <div class="menu-card">
+      <h2>PAUSED</h2>
+      <button id="resume-btn">RESUME</button>
+      <button id="quit-btn" class="ghost">ABORT MISSION</button>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="gameover" class="overlay hidden">
+    <div class="menu-card">
+      <h2>SHOT DOWN</h2>
+      <div class="result">
+        <div class="res-row"><span>Final Score</span><b id="final-score">0</b></div>
+        <div class="res-row"><span>Waves Survived</span><b id="final-wave">0</b></div>
+        <div class="res-row"><span>Total Kills</span><b id="final-kills">0</b></div>
+      </div>
+      <button id="restart-btn">REDEPLOY</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <p>Building world…</p>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

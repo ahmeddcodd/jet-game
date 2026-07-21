@@ -1,0 +1,9 @@
+# Normalize text line endings in the repo; check out native on each platform.
+* text=auto
+
+# Binary assets — never line-ending-converted or diffed as text.
+*.glb   binary
+*.blend binary
+*.wasm  binary
+*.png   binary
+*.jpg   binary

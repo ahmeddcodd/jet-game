@@ -1,0 +1,8 @@
+# Blender sources aren't needed to build the site — the .glb outputs are
+# committed under public/assets/models. Excluding ~5 MB of .blend files keeps
+# deploy uploads fast.
+blender/
+
+# Never upload local build output or deps; Vercel builds from source.
+dist/
+node_modules/
