@@ -153,7 +153,7 @@ blender\build_all.bat
 | Enemy jet | `blender/build_enemy_jet.py` | `blender/enemy_jet.blend` | `public/assets/models/enemy_jet.glb` |
 | Helicopter | `blender/build_helicopter.py` | `blender/helicopter.blend` | `public/assets/models/helicopter.glb` |
 | Missile / Tree / Rock / Cloud | `blender/build_props.py` | `blender/*.blend` | `public/assets/models/*.glb` |
-| Explosion / Debris / Muzzle flash | `blender/build_vfx.py` | `blender/vfx_*.blend` | `public/assets/models/vfx_*.glb` |
+| Explosion / Debris / Muzzle / Ember | `blender/build_vfx.py` | `blender/vfx_*.blend` | `public/assets/models/vfx_*.glb` |
 
 ---
 
@@ -161,26 +161,46 @@ blender\build_all.bat
 
 Built in Blender by `blender/build_vfx.py` and driven at runtime by `src/vfx.js`.
 
-**Blender authors the forms; the runtime animates them.** Baking the motion into the assets — a simulated fireball flipbook, keyframed debris — would cost megabytes and still play back identically on every kill. Driving simple forms in code costs nothing and gives every explosion its own debris directions, spin and timing.
+**Blender owns the forms, the runtime owns the motion and the shading.** Baking the animation into the assets — a simulated fireball flipbook, keyframed debris — would cost megabytes and still play back identically on every kill.
 
 | Asset | Triangles | Contents |
 |---|---|---|
-| `vfx_explosion.glb` | 580 | 3 nested fire shells, a shockwave ring, 5 smoke blobs |
+| `vfx_explosion.glb` | 5,504 | 3 nested fire shells, a shockwave ring, 4 smoke billows |
 | `vfx_debris.glb` | 194 | 10 chunks: torn panels, structural pieces with spars, an engine section |
-| `vfx_muzzle.glb` | 25 | 7-point flash star + propellant cone |
+| `vfx_muzzle.glb` | 351 | 9-point flash star, propellant cone, smoke puff |
+| `vfx_ember.glb` | 6 | one tapered spark shard, drawn as an InstancedMesh |
 
-These are **deliberately low poly**, the one exception to the 90k budget. You fly behind the player jet for the whole game, so it earns its polygons; a single kill instead puts an explosion, a shockwave, eight debris chunks and a dozen smoke puffs on screen in one frame, each alive for a second or two. Spending 90k on any of them would cost frames exactly when the most is happening.
+These are **deliberately low poly**, the one exception to the 90k budget. You fly behind the player jet for the whole game, so it earns its polygons; a single kill instead puts a fireball, a shockwave, eight debris chunks, four smoke billows and a hundred embers on screen in one frame.
 
-What makes it read as an explosion rather than an expanding orange ball:
+### What Blender is responsible for: silhouette
 
-- **Three shells, not one.** The runtime expands and fades them at staggered rates (`lag = idx * 0.10`), so the core burns out while the outer shell balloons into smoke — the blast reads as a volume.
-- **Fire cools as it expands.** Each shell ramps white-hot → orange → soot (`FIRE_HOT`/`FIRE_MID`/`FIRE_LOW`) instead of just dropping opacity.
-- **Expansion eases off.** `1 - (1-k)^2.6` — real blasts decelerate hard as they entrain air; linear growth looks like an inflating balloon.
-- **The shockwave outruns the fireball** and dies at 2.4× the rate, which is the cue that something *detonated*.
-- **Debris inherits the victim's velocity** (`vel.addScaledVector(inherit, 0.55)`), so wreckage reads as coming *off* an aircraft rather than being emitted by a point. It falls under the same gravity as the flight model, trails thinning smoke, and despawns on ground contact.
-- **Muzzle flashes are randomly rolled** about the barrel axis and last 60 ms, so sustained fire never strobes an identical shape.
+The single biggest reason a real-time explosion reads as fake is a **hard, regular edge** — a smooth sphere is recognisable as a sphere no matter how it's coloured. So the shapes are broken up two ways: multi-octave noise displacement, so no silhouette arc is ever a clean curve; and **radial plumes**, a handful of directions pushed much further out than the rest. Real blasts burst unevenly through whatever gives way first, and those lobes are what make it read as combustion rather than a ball of fire. Smoke is built as *clusters* of lobes (cauliflower), not single spheres, because billowing comes from the shape, not the shading.
 
-Everything is **pooled** (`Pool` in `src/vfx.js`) — fresh geometry and materials per kill would allocate during the busiest moment of the game and churn GPU memory as wreckage expired. Measured over 8 rounds of 12 simultaneous kills, the pools settle at 3 explosions / 34 debris / 8 flashes and stop growing.
+Tessellation is set by what the shader needs, not the silhouette: the fire fades on the angle between surface and eye, and below icosphere subdivision 4 that gradient visibly facets into triangles.
+
+### What the shader is responsible for: everything per-pixel
+
+A textured or vertex-coloured sphere always reads as a sphere. Four things separate fire from a glowing ball, and all four change every frame:
+
+1. **No hard edge.** A solid mesh standing in for a volume fades where the surface turns away from the eye — a ray through the middle crosses far more fire than one at the rim. Measured across a fireball, intensity ramps over ~8–10 px at each edge instead of stepping.
+2. **Churn.** A domain-warped noise field drifts through the shell so it boils instead of uniformly scaling.
+3. **Temperature, not colour.** A blackbody ramp driven by the noise puts white cores and dull red fringes in the same frame. Measured mid-life: **11% white / 71% orange / 18% sooty dark** across 56 distinct colour buckets — a small white core in a large orange body, which is what real fire looks like.
+4. **Dissolve, not fade.** Eroding alpha against the noise with a rising threshold breaks the fireball into wisps; lowering opacity uniformly just makes a ghost ball.
+
+### The rest of the blast
+
+- **It lights the world.** A pooled `PointLight` flares to peak in 0.15 s and is gone by 1.2 s. An explosion that doesn't illuminate what's around it is the clearest tell that it's a sprite pasted over the scene. Lights are allocated once and never added or removed — changing the light count forces THREE to recompile every affected material, which would stutter on exactly the frame a blast goes off.
+- **Embers.** A hundred shards thrown per kill, stretched along their own velocity so fast ones streak and slow ones read as dots, each flickering on its own phase. Drawn as one `InstancedMesh` — as separate meshes that would be a hundred draw calls for a dozen pixels each.
+- **Smoke outlives fire by five seconds.** Fire dies at ~1.3 s; the column is still rising and growing at 6.5 s (measured: 57 units of rise, 2.8× growth). Tying both to one lifetime is why game explosions so often vanish all at once.
+- **The shockwave outruns the fireball** and dies first — the cue that something *detonated* rather than merely caught fire.
+- **Debris inherits the victim's velocity**, so wreckage comes *off* an aircraft rather than being emitted by a point, falls under the flight model's gravity, and sheds sparks while it's still hot.
+- **Secondary detonations** stagger 0.1–0.34 s behind aircraft-sized kills; fuel and ordnance don't all go up in the same instant.
+
+### Cost
+
+Everything is **pooled**, and concurrent explosions are **capped at 10** — smoke lingering for seconds is what stacks them up, and each is seven overlapping transparent meshes. Without the cap a twelve-kill wave left 29 live at once. The noise runs a 2-octave domain warp feeding a 3-octave detail pass rather than 4+4; that alone cut the fragment cost ~40%.
+
+Worst case measured (10 simultaneous full-size blasts filling the screen, 320 embers, 48 debris) costs **2.75× a quiet frame**, down from 4.7× before the cap and the cheaper noise. Note these timings come from a software-WebGL context, which is far more fragment-bound than real hardware — treat the *ratio* as meaningful and the absolute milliseconds as pessimistic.
 
 Effects update **outside** the `state === 'playing'` guard, so the player's own death explosion plays out instead of freezing on its first frame.
 
@@ -203,7 +223,7 @@ jet-game/
 │   ├── player.js           # Player flight physics + chase camera
 │   ├── enemies.js          # Enemy AI (jet/helo), bullets, homing missiles, trails
 │   ├── particles.js        # GPU particle system: smoke, sparks, trails
-│   ├── vfx.js              # Pooled Blender VFX: fireballs, debris, muzzle flashes
+│   ├── vfx.js              # Pooled Blender VFX + fire/smoke shaders, embers, flash lights
 │   ├── input.js            # Keyboard + mouse with pointer lock
 │   ├── audio.js            # Procedural Web Audio SFX + engine drone
 │   ├── hud.js              # HUD: bars, score, radar canvas
@@ -229,7 +249,8 @@ jet-game/
             ├── cloud.glb
             ├── vfx_explosion.glb
             ├── vfx_debris.glb
-            └── vfx_muzzle.glb
+            ├── vfx_muzzle.glb
+            └── vfx_ember.glb
 ```
 
 Three.js is installed from npm (`three`) and bundled by Vite. The `.glb` models live in `public/`, so Vite serves them as-is in dev and copies them into `dist/` on build.

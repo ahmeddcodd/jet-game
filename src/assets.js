@@ -31,6 +31,7 @@ const ASSETS = {
   vfxExplosion: 'vfx_explosion.glb',
   vfxDebris: 'vfx_debris.glb',
   vfxMuzzle: 'vfx_muzzle.glb',
+  vfxEmber: 'vfx_ember.glb',
 };
 
 // Track loading progress for UI
