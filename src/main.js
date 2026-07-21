@@ -237,10 +237,13 @@ const _avUp = new THREE.Vector3(0, 1, 0);
 const _avCamFwd = new THREE.Vector3();
 
 /** Project a world DIRECTION to screen. Returns null if it is behind us. */
+const _avProj = new THREE.Vector3();
 function projectDir(dir, w, h) {
   _avCamFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
-  if (dir.dot(_avCamFwd) <= 0.02) return null;          // behind or edge-on
-  const p = _avA.copy(camera.position).addScaledVector(dir, 1000).project(camera);
+  // Reject anything near or behind the plane of the lens: those directions
+  // project to effectively infinite screen coordinates.
+  if (dir.dot(_avCamFwd) <= 0.12) return null;
+  const p = _avProj.copy(camera.position).addScaledVector(dir, 1000).project(camera);
   return { x: (p.x * 0.5 + 0.5) * w, y: (-p.y * 0.5 + 0.5) * h };
 }
 
@@ -255,16 +258,38 @@ function buildAvionics() {
   _avFlat.normalize();
   _avRight.crossVectors(_avFlat, _avUp).normalize();
 
-  // ---- Pitch ladder: a rung every 10°, spanning the useful range ---------
+  // ---- Pitch ladder -----------------------------------------------------
+  // Both ends of a rung must sit at the SAME elevation, so each endpoint is
+  // built in spherical coordinates from (bearing, elevation). The previous
+  // version added a fixed world vector to the elevation direction and
+  // renormalised, which does not preserve elevation: at 40° the two ends
+  // ended up 47° apart and 14,000 px long, and the ladder fanned into a
+  // starburst instead of stacking as horizontal bars.
+  const dirAt = (bearingRad, elevRad, out) => out.set(
+    Math.sin(bearingRad) * Math.cos(elevRad),
+    Math.sin(elevRad),
+    Math.cos(bearingRad) * Math.cos(elevRad),
+  );
+  const hdgRad = Math.atan2(_avFlat.x, _avFlat.z);
+  const SPAN = 9 * Math.PI / 180;          // rung half-width in azimuth
+  // Only draw rungs near the current view. Directions far outside the frustum
+  // project to enormous coordinates, which is what produced the long diagonals.
+  const viewElev = Math.asin(clamp(_avFwd.y, -1, 1)) * 180 / Math.PI;
   const rungs = [];
-  const halfWidth = 0.16;            // rung half-length as a direction offset
-  for (let deg = -60; deg <= 60; deg += 10) {
+  const LIMIT = Math.max(w, h) * 2.5;
+  for (let deg = -80; deg <= 80; deg += 10) {
+    if (Math.abs(deg - viewElev) > 45) continue;
     const r = deg * Math.PI / 180;
-    // Direction at elevation `deg` along the current heading.
-    _avDir.copy(_avFlat).multiplyScalar(Math.cos(r)).addScaledVector(_avUp, Math.sin(r)).normalize();
-    const a = projectDir(_avA.copy(_avDir).addScaledVector(_avRight, -halfWidth).normalize(), w, h);
-    const b = projectDir(_avB.copy(_avDir).addScaledVector(_avRight, halfWidth).normalize(), w, h);
-    if (a && b) rungs.push({ a, b, deg });
+    // +SPAN first: world +X projects to screen LEFT (see the handedness note
+    // in player.js), so this order puts `a` on the left and `b` on the right.
+    // With them reversed the tip ticks turned away from the horizon instead of
+    // toward it, which is the cue that tells you which way is up when inverted.
+    const a = projectDir(dirAt(hdgRad + SPAN, r, _avA), w, h);
+    const b = projectDir(dirAt(hdgRad - SPAN, r, _avB), w, h);
+    if (!a || !b) continue;
+    if (Math.abs(a.x) > LIMIT || Math.abs(a.y) > LIMIT ||
+        Math.abs(b.x) > LIMIT || Math.abs(b.y) > LIMIT) continue;
+    rungs.push({ a, b, deg });
   }
 
   // ---- Heading tape: a tick every 10°, labelled every 30° ----------------
@@ -301,6 +326,7 @@ function buildAvionics() {
     mach: 'M ' + (player.speed / 190).toFixed(2),
     gText: player.gLoad.toFixed(1) + 'G',
     headingText: String(Math.round(hdgNow)).padStart(3, '0'),
+    gunLocked: targeting.isLocked,
   };
 }
 

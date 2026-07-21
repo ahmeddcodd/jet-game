@@ -26,6 +26,7 @@ from bpy_helpers import (
     reset_scene, mat, hex_to_rgb, cone, cylinder, cube, ico, uv_sphere, torus,
     group, flat_shade, assign, save_blend, export_glb, TAU,
     panel_inset, detail_pass, normalize_tris, total_tris, apply_scale, build_lod_chain,
+    smooth_all,
     subdivide_mesh, collect_meshes, join_meshes, join_except,
 )
 
@@ -155,6 +156,7 @@ def build_missile():
     join_except(root, ("glow",), "MissileBody")
     print("MISSILE_TRIS_FINAL:", final, "meshes:", len(collect_meshes(root)))
     root.rotation_euler = (0, 0, math.radians(180))
+    smooth_all(root, 38.0)
     _save("missile", root)
 
 
@@ -217,6 +219,7 @@ def build_tree():
     print("TREE_TRIS_FINAL:", final)
     lods = build_lod_chain(root, "Tree", SCENERY_LODS)
     _flatten_lods(root, lods, "Tree")
+    smooth_all(root, 42.0)
     _save("tree", root, lods)
 
 
@@ -263,6 +266,7 @@ def build_rock():
     print("ROCK_TRIS_FINAL:", final)
     lods = build_lod_chain(root, "Rock", SCENERY_LODS)
     _flatten_lods(root, lods, "Rock")
+    smooth_all(root, 42.0)
     _save("rock", root, lods)
 
 
@@ -305,6 +309,7 @@ def build_cloud():
     print("CLOUD_TRIS_FINAL:", final)
     lods = build_lod_chain(root, "Cloud", SCENERY_LODS)
     _flatten_lods(root, lods, "Cloud")
+    smooth_all(root, 42.0)
     _save("cloud", root, lods)
 
 

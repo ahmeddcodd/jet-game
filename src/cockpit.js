@@ -39,83 +39,80 @@ export function createCockpit() {
     roughness: 0.06, metalness: 0.0, side: THREE.DoubleSide, depthWrite: false,
   });
 
-  // ---- Coaming: the dark shroud along the bottom of the view --------------
-  // A shallow curved shelf. This is the single most important piece — it gives
-  // the eye a foreground reference, without which a first-person view reads as
-  // a floating camera rather than a cockpit.
+  // Layout is derived from the frustum, not guessed. At FOV ~70° the half-angle
+  // is 35°, so a feature at distance d and height y lands at |y| / (d*tan35°)
+  // of half-screen. Everything below is placed from that relation: the earlier
+  // pass put the glare shield at 18% below centre, where it read as a black bar
+  // across the middle of the view, and an arch that swallowed the top third.
+
+  // ---- Coaming: dark shroud along the bottom, top edge ~28% below centre ---
   const coamShape = new THREE.Shape();
-  coamShape.moveTo(-1.30, 0);
-  coamShape.quadraticCurveTo(0, 0.30, 1.30, 0);
-  coamShape.lineTo(1.30, -0.55);
-  coamShape.lineTo(-1.30, -0.55);
+  coamShape.moveTo(-1.55, 0);
+  coamShape.quadraticCurveTo(0, 0.17, 1.55, 0);
+  coamShape.lineTo(1.55, -0.70);
+  coamShape.lineTo(-1.55, -0.70);
   coamShape.closePath();
   const coaming = new THREE.Mesh(
-    new THREE.ExtrudeGeometry(coamShape, { depth: 0.30, bevelEnabled: true,
-      bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2 }),
+    new THREE.ExtrudeGeometry(coamShape, { depth: 0.34, bevelEnabled: true,
+      bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2 }),
     dark);
-  coaming.position.set(0, -0.46, -1.28);
+  coaming.position.set(0, -0.66, -1.30);
   root.add(coaming);
 
-  // Glare shield lip catching the sun
-  const lip = new THREE.Mesh(new THREE.BoxGeometry(2.62, 0.045, 0.16), trim);
-  lip.position.set(0, -0.30, -1.20);
-  lip.rotation.x = -0.22;
+  // Glare shield lip, sitting ON the coaming rather than floating above it.
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(3.02, 0.035, 0.13), trim);
+  lip.position.set(0, -0.505, -1.24);
+  lip.rotation.x = -0.20;
   root.add(lip);
 
-  // ---- Instrument panel, angled back toward the pilot --------------------
-  const ip = new THREE.Mesh(new THREE.BoxGeometry(2.10, 0.78, 0.06), panel);
-  ip.position.set(0, -0.86, -1.12);
-  ip.rotation.x = 0.38;
+  // ---- Instrument panel, angled back toward the pilot ---------------------
+  const ip = new THREE.Mesh(new THREE.BoxGeometry(2.30, 0.70, 0.05), panel);
+  ip.position.set(0, -0.99, -1.16);
+  ip.rotation.x = 0.40;
   root.add(ip);
 
-  // MFD bezels — three screens, faintly self-lit so they read in shadow.
   const mfdGlass = new THREE.MeshStandardMaterial({
-    color: 0x0a1a18, emissive: 0x0d3a33, emissiveIntensity: 0.55,
+    color: 0x0a1a18, emissive: 0x0d3a33, emissiveIntensity: 0.6,
     roughness: 0.35, metalness: 0.1,
   });
-  for (const [x, w, h] of [[-0.62, 0.44, 0.40], [0, 0.50, 0.44], [0.62, 0.44, 0.40]]) {
-    const bezel = new THREE.Mesh(new THREE.BoxGeometry(w + 0.06, h + 0.06, 0.03), trim);
-    bezel.position.set(x, -0.84, -1.10);
-    bezel.rotation.x = 0.38;
+  for (const [x, w2, h2] of [[-0.66, 0.42, 0.34], [0, 0.46, 0.38], [0.66, 0.42, 0.34]]) {
+    const bezel = new THREE.Mesh(new THREE.BoxGeometry(w2 + 0.05, h2 + 0.05, 0.025), trim);
+    bezel.position.set(x, -0.975, -1.145);
+    bezel.rotation.x = 0.40;
     root.add(bezel);
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mfdGlass);
-    screen.position.set(x, -0.833, -1.086);
-    screen.rotation.x = 0.38;
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(w2, h2), mfdGlass);
+    screen.position.set(x, -0.970, -1.133);
+    screen.rotation.x = 0.40;
     root.add(screen);
   }
 
-  // ---- Canopy frame ------------------------------------------------------
-  // Windscreen bow plus two rails. Kept thin: the frame should say "cockpit"
-  // at the edge of vision without eating the part of the screen you fight in.
-  const bowGeo = new THREE.TorusGeometry(1.26, 0.032, 8, 40, Math.PI);
-  const bow = new THREE.Mesh(bowGeo, dark);
-  bow.position.set(0, -0.16, -1.34);
-  bow.rotation.x = 0.10;
+  // ---- Canopy frame -------------------------------------------------------
+  // Wide and thin. The arch is pushed out and up so only its lower legs are in
+  // frame — a bow drawn across the top of the screen is what made the previous
+  // version feel like looking out of a letterbox.
+  const bow = new THREE.Mesh(
+    new THREE.TorusGeometry(1.72, 0.022, 8, 48, Math.PI), dark);
+  bow.position.set(0, -0.30, -1.44);
+  bow.rotation.x = 0.06;
   root.add(bow);
 
-  // Centre post of the windscreen, foreshortened so it doesn't split the HUD.
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.30, 0.05), dark);
-  post.position.set(0, 0.92, -1.33);
-  root.add(post);
-
   for (const sx of [-1, 1]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 1.5), dark);
-    rail.position.set(sx * 1.14, -0.10, -0.62);
-    rail.rotation.y = sx * 0.10;
-    rail.rotation.z = sx * -0.06;
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.030, 1.5), dark);
+    rail.position.set(sx * 1.52, -0.26, -0.72);
+    rail.rotation.y = sx * 0.09;
+    rail.rotation.z = sx * -0.05;
     root.add(rail);
 
-    // Side console tops, just in peripheral vision.
-    const console_ = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, 1.1), panel);
-    console_.position.set(sx * 1.02, -0.72, -0.60);
-    console_.rotation.z = sx * 0.16;
-    root.add(console_);
+    const side = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.05, 1.0), panel);
+    side.position.set(sx * 1.30, -0.90, -0.70);
+    side.rotation.z = sx * 0.14;
+    root.add(side);
   }
 
   // Canopy glass — a faint tint so the sun grazes it, no more.
-  const glass = new THREE.Mesh(new THREE.SphereGeometry(1.34, 20, 14,
-    0, Math.PI * 2, 0, Math.PI * 0.55), glassTint);
-  glass.position.set(0, -0.20, -0.55);
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(1.62, 24, 16,
+    0, Math.PI * 2, 0, Math.PI * 0.5), glassTint);
+  glass.position.set(0, -0.34, -0.50);
   glass.rotation.x = Math.PI;
   root.add(glass);
 

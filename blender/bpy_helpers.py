@@ -201,6 +201,50 @@ def save_blend(path):
     bpy.ops.wm.save_as_mainfile(filepath=path)
 
 
+def smooth_by_angle(obj, angle_deg=38.0):
+    """Smooth-shade a mesh, but keep edges sharper than `angle_deg` hard.
+
+    Everything here was flat-shaded, which meant every one of the 90k triangles
+    showed as its own facet — so raising the polygon budget made surfaces
+    *busier*, not smoother, and curved parts like the fuselage, nose cone and
+    canopy read as faceted blocks. Angle-thresholded smoothing is the fix:
+    normals are averaged across gentle curvature so barrels and cones read as
+    round, while genuine creases — panel steps, wing leading edges, the seams
+    the inset passes carved — stay crisp because they exceed the threshold.
+    """
+    if obj.type != 'MESH':
+        return obj
+    import bmesh as _bm
+    mesh = obj.data
+    for p in mesh.polygons:
+        p.use_smooth = True
+    # Mark creases sharp directly rather than via mesh.use_auto_smooth, which
+    # Blender 4.1 removed. Sharp edges survive the glTF export because the
+    # exporter bakes split normals rather than re-deriving them at load.
+    thresh = math.radians(angle_deg)
+    bm = _bm.new()
+    bm.from_mesh(mesh)
+    for e in bm.edges:
+        if len(e.link_faces) == 2:
+            try:
+                e.smooth = e.calc_face_angle() <= thresh
+            except ValueError:
+                e.smooth = True
+        else:
+            e.smooth = False          # boundary edges stay hard
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    return obj
+
+
+def smooth_all(root, angle_deg=38.0):
+    """Apply angle-thresholded smoothing to every mesh under root."""
+    for m in collect_meshes(root):
+        smooth_by_angle(m, angle_deg)
+    return root
+
+
 def export_glb(path, draco=True):
     """Export the whole scene as a single GLB.
 

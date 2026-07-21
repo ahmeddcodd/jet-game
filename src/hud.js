@@ -470,15 +470,37 @@ export class HUD {
       ctx.lineWidth = 1.4;
     }
 
-    // ---- Boresight gun cross --------------------------------------------
-    ctx.strokeStyle = DIM;
+    // ---- Gunsight -------------------------------------------------------
+    // A pipper you can actually aim with: a ranging ring, a bright centre dot,
+    // and four ticks. Drawn brighter than the ladder because it is the thing
+    // you put on the target, and the previous faint cross vanished against
+    // terrain. Turns red and grows a lock ring when a target is locked.
+    const locked = !!av.gunLocked;
+    ctx.strokeStyle = locked ? 'rgba(255,90,90,0.95)' : 'rgba(150,255,200,0.95)';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.7;
     ctx.beginPath();
-    ctx.moveTo(cx - 12, cy); ctx.lineTo(cx - 4, cy);
-    ctx.moveTo(cx + 4, cy);  ctx.lineTo(cx + 12, cy);
-    ctx.moveTo(cx, cy - 12); ctx.lineTo(cx, cy - 4);
-    ctx.moveTo(cx, cy + 4);  ctx.lineTo(cx, cy + 12);
+    ctx.arc(cx, cy, 15, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - 26, cy); ctx.lineTo(cx - 16, cy);
+    ctx.moveTo(cx + 16, cy); ctx.lineTo(cx + 26, cy);
+    ctx.moveTo(cx, cy - 26); ctx.lineTo(cx, cy - 16);
+    ctx.moveTo(cx, cy + 16); ctx.lineTo(cx, cy + 26);
+    ctx.stroke();
+    if (locked) {
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 23, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.lineWidth = 1.4;
     ctx.strokeStyle = GREEN;
+    ctx.fillStyle = GREEN;
 
     ctx.restore();
 

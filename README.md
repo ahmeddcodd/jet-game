@@ -213,7 +213,7 @@ Every model is authored to **90,000–91,000 triangles** (`normalize_tris()` in 
 
 Trees, rocks and clouds are instanced **~246×** across the archipelago, so each ships a decimated LOD chain in the same `.glb`. `getLOD()` in `src/assets.js` reads the `<Name>_LOD0..3` nodes into a `THREE.LOD`; the renderer swaps levels itself. In flight most props sit at LOD2/LOD3 — measured at cruise: 151 at LOD3, 87 at LOD2, 11 at LOD1, none at LOD0. Aircraft now carry LOD too (`applyAirframeLOD` in `src/models.js`): only the merged hull swaps, while flames, glows, nav lights and rotors stay outside it so the runtime hooks still resolve and still render at any range. The whole scene renders at **181 draws / 504k triangles** cruising, **271 / 682k** low over the dense island cluster, and **68 / 343k** with thirteen enemies airborne — without the airframe LOD that last case measured 152 draws / 971k.
 
-Two further things keep it cheap: each LOD level is **merged to a single multi-material mesh** in Blender (a 98-part airframe would otherwise be 98 draw calls, ×10 enemies), and clones **share geometry buffers** — 249 instances use 61 geometries. Models are **Draco-compressed** on export (~60 MB → 11 MB), decoded by a locally bundled decoder in `public/draco/` (no CDN).
+Two further things keep it cheap: each LOD level is **merged to a single multi-material mesh** in Blender (a 98-part airframe would otherwise be 98 draw calls, ×10 enemies), and clones **share geometry buffers** — 249 instances use 61 geometries. Models are **Draco-compressed** on export (~60 MB → 6.4 MB), decoded by a locally bundled decoder in `public/draco/` (no CDN).
 
 ---
 
