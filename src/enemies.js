@@ -200,6 +200,19 @@ export class EnemyJet extends Enemy {
     // commits to a maneuver and the player can read what it is doing. The
     // variety between bandits comes from these fixed traits, not from noise.
     this.aggression = rand(0.75, 1.25);
+    // Each pilot has its own idea of where to sit. A single shared constant
+    // made every bandit converge on the identical point behind the player and
+    // hold it exactly — four jets stacked at the same range, all matching
+    // speed, and the fight stopped moving.
+    this.standoff = FIGHT.sixDistance * rand(0.8, 1.9);
+    // Pursuit range breathes rather than holding still. With a fixed standoff
+    // a bandit settles onto its number, matches speed exactly and the fight
+    // stops moving — measured dead at 170 units for as long as you care to
+    // watch. Weaving in and out keeps the pressure varying and looks like a
+    // pilot working for a shot, and because the overtake stays capped it never
+    // builds enough closure to overshoot.
+    this.weavePhase = rand(0, Math.PI * 2);
+    this.weaveRate = rand(0.32, 0.58);
     this.defenseStyle = Math.random();   // 0 = prefers rolling, 1 = prefers scissors
     this.breakBias = Math.random() < 0.5 ? -1 : 1;
     this.breakDir = this.breakBias;
@@ -366,7 +379,7 @@ export class EnemyJet extends Enemy {
       case JET_STATE.ATTACK: {
         // Lead the target so the shot has somewhere to arrive.
         desired.copy(this._leadPoint(player, dist)).sub(this.mesh.position).normalize();
-        targetSpeed = this._closureSpeed(dist, player);
+        targetSpeed = this._closureSpeed(dist, player, t);
         break;
       }
       default: {
@@ -375,18 +388,18 @@ export class EnemyJet extends Enemy {
         //   pure  — straight at them; the default closing curve
         //   lead  — aim ahead; only once close enough for it to become a shot
         const six = desired.copy(player.position)
-          .addScaledVector(playerFwd, -FIGHT.sixDistance);
+          .addScaledVector(playerFwd, -this._wantRange(t));
         if (dist > 700) {
           six.lerp(player.position, 0.55);           // cut the corner from far out
-        } else if (closure > 70 && dist < 340) {
+        } else if (closure > 45 && dist < 560) {
           // Closing too fast: lag behind their tail to bleed off the overtake.
           six.addScaledVector(playerFwd, -110);
         } else if (dist < 300) {
           six.copy(this._leadPoint(player, dist));   // transition to a firing solution
         }
         desired.sub(this.mesh.position).normalize();
-        targetSpeed = this._closureSpeed(dist, player);
-        if (closure > 70 && dist < 340) targetSpeed = SPD.slow;   // kill an overtake
+        targetSpeed = this._closureSpeed(dist, player, t);
+        if (closure > 45 && dist < 560) targetSpeed = SPD.slow;   // kill an overtake
         break;
       }
     }
@@ -478,10 +491,29 @@ export class EnemyJet extends Enemy {
    * the target's tail, and inside it the term goes negative so it backs off
    * instead of overrunning into a merge.
    */
-  _closureSpeed(dist, player) {
-    const want = FIGHT.sixDistance;
+  /** Standoff for this instant — the pilot's own range, weaving. */
+  _wantRange(time) {
+    return this.standoff * (1 + 0.34 * Math.sin(time * this.weaveRate + this.weavePhase));
+  }
+
+  _closureSpeed(dist, player, time) {
+    const want = this._wantRange(time);
     const match = player.speed || SPD.corner;
-    return clamp(match + (dist - want) * 0.45, SPD.scrub, SPD.run);
+    // How much faster than the player this bandit is willing to be. Uncapped,
+    // one closing from 600 units arrived on the six ~60 units/s hot, could not
+    // kill the overtake, and sailed straight through to 1500 units — then spent
+    // ten seconds rejoining. From the cockpit that reads as enemies randomly
+    // flying away, which is exactly what it looked like. Capping the overtake
+    // means it arrives at a speed it can actually hold.
+    //
+    // The negative side matters just as much: inside its standoff it drops
+    // BELOW the player's speed to fall back, instead of merely matching and
+    // sitting there.
+    // 68, not 55: the tighter cap fixed the overshoot but made a bandit take
+    // sixteen seconds to close 430 units, which is its own kind of boring. The
+    // deceleration ramp is what prevents the overshoot, not the ceiling.
+    const overtake = clamp((dist - want) * 0.30, -34, 68);
+    return clamp(match + overtake, SPD.scrub, SPD.run);
   }
 
   /** Where the player will be when the bullet arrives. */

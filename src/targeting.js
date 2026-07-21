@@ -49,6 +49,12 @@ export class TargetingComputer {
     if (had && !silent && this.onLockLost) this.onLockLost();
   }
 
+  /** Range only — used to keep a hand-picked target that is off the nose. */
+  _inRadarRange(player, enemy) {
+    if (!enemy || !enemy.alive) return false;
+    return _v1.copy(enemy.position).sub(player.position).length() <= RADAR.range;
+  }
+
   /** Angle test + range test for one candidate. Returns dot, or null if out of range. */
   _track(player, enemy, cone) {
     if (!enemy || !enemy.alive) return null;
@@ -71,9 +77,38 @@ export class TargetingComputer {
     return best;
   }
 
-  /** Cycle to the next valid bandit in the seeker cone (Tab). */
+  /**
+   * Every live bandit in radar range, nearest-the-nose first — regardless of
+   * whether it is in the seeker cone.
+   *
+   * DESIGNATING a target and LOCKING it are different things. Both R and Tab
+   * used to filter by the 25.8-degree seeker cone, which meant that the moment
+   * a bandit slid off the nose — exactly when you want to call it out and go
+   * after it — neither key did anything at all. You had to fly it back into the
+   * cone by eye first, with no cue for which way to turn.
+   *
+   * Designation is now free in any direction; the lock still has to be earned
+   * by pulling the nose onto it and holding it there.
+   */
+  _inRange(player, enemies) {
+    const fwd = _v2.set(0, 0, 1).applyQuaternion(player.mesh.quaternion);
+    const out = [];
+    for (const e of enemies) {
+      if (!e || !e.alive) continue;
+      const to = _v1.copy(e.position).sub(player.position);
+      const dist = to.length();
+      if (dist > RADAR.range || dist < 1) continue;
+      out.push({ e, dot: fwd.dot(to.divideScalar(dist)), dist });
+    }
+    // Nearest the nose first, so repeated Tab presses walk outward from the
+    // boresight instead of jumping around in spawn order.
+    out.sort((a, b) => b.dot - a.dot);
+    return out;
+  }
+
+  /** Cycle to the next bandit in radar range (Tab). */
   cycle(player, enemies) {
-    const valid = enemies.filter((e) => this._track(player, e, RADAR.cone));
+    const valid = this._inRange(player, enemies).map((c) => c.e);
     if (!valid.length) { this.clear(); return null; }
     const i = valid.indexOf(this.target);
     const next = valid[(i + 1) % valid.length];
@@ -81,9 +116,10 @@ export class TargetingComputer {
     return next;
   }
 
-  /** Snap the seeker to whatever is nearest the nose (R). */
+  /** Designate whatever is nearest the nose, anywhere in radar range (R). */
   lockNearest(player, enemies) {
-    const best = this._bestCandidate(player, enemies);
+    const best = this._bestCandidate(player, enemies)
+      || (this._inRange(player, enemies)[0] || {}).e;
     if (best) this._select(best, true);
     return best;
   }
@@ -136,7 +172,12 @@ export class TargetingComputer {
         if (this.outside > RADAR.breakGrace) this.clear();
       } else {
         this.progress = Math.max(0, this.progress - dt / (RADAR.acquireTime * 0.6));
-        if (this.outside > RADAR.breakGrace * 2) this.clear(true);
+        // A target the pilot picked by hand is kept until it dies or leaves
+        // radar range. Dropping it for being off the nose defeats the point:
+        // you designate precisely because you have lost sight of it, and the
+        // HUD arrow then tells you which way to pull.
+        if (!this.manual && this.outside > RADAR.breakGrace * 2) this.clear(true);
+        if (this.manual && !this._inRadarRange(player, this.target)) this.clear(true);
       }
     }
   }
