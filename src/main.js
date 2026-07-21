@@ -10,6 +10,7 @@ import { EnemyJet, EnemyHelo, Bullet, Missile, Flare, MISSILE } from './enemies.
 import { TargetingComputer, LOCK_STATE } from './targeting.js';
 import { makeSkyEnvironment } from './surfacing.js';
 import { createCockpit } from './cockpit.js';
+import { VFX } from './vfx.js';
 import { loadAll, loadStatus } from './assets.js';
 import { clamp, rand, randInt, tmp } from './utils.js';
 
@@ -80,7 +81,7 @@ const shadowOffset = new THREE.Vector3(-800, 1400, -1200);
 sun.position.copy(shadowOffset);
 
 // World + systems — created AFTER assets are loaded (see init() at bottom).
-let world, particles, player, cockpit;
+let world, particles, player, cockpit, vfx;
 const input = new Input(renderer.domElement);
 const audio = new AudioEngine();
 const hud = new HUD();
@@ -443,6 +444,9 @@ function firePlayerGun() {
     dir.x += rand(-0.01, 0.01); dir.y += rand(-0.01, 0.01); dir.z += rand(-0.01, 0.01);
     const b = new Bullet(scene, o, dir, 420, 'player', 8, 0xfff2a0);
     game.bullets.push(b);
+    // Flash at each barrel. Only worth drawing in the cockpit and at chase
+    // range — from further out it would be a subpixel sprite.
+    vfx.muzzleFlash(o, fwd, 0.55);
   }
   audio.gun();
 }
@@ -578,10 +582,16 @@ function onEnemyKilled(e) {
   const points = Math.round(e.score * mult);
   game.score += points;
 
+  // Debris inherits the victim's velocity, so wreckage carries on along its
+  // flight path instead of appearing to be emitted from a stationary point.
+  const big = e.type === 'helo' ? 3.4 : 2.8;
+  vfx.explode(e.position.clone(), big, e.type === 'helo' ? 9 : 7, e.velocity);
   particles.explosion(e.position.clone(), e.type === 'helo' ? 1.4 : 1.1);
   audio.explosion();
   hud.hitMarker();
-  player.addTrauma(0.12);
+  // Shake scales with how close the kill was — a distant one should not punch.
+  const near = 1 - Math.min(1, e.position.distanceTo(player.position) / 700);
+  player.addTrauma(0.10 + near * 0.45);
 
   if (game.streak >= 2) {
     const name = STREAK_NAMES[Math.min(game.streak, STREAK_NAMES.length - 1)];
@@ -608,6 +618,9 @@ function updateBullets(dt) {
         const r = e.type === 'helo' ? 3.2 : 2.6;
         if (b.position.distanceTo(e.position) < r) {
           const killed = e.damage(b.damage);
+          // Impact spark. Scale 0 means fireball only, no debris — a cannon
+          // round should spark, not blow a chunk off.
+          vfx.explode(b.position.clone(), 0.35, 0);
           particles.hitSpark(b.position.clone(), b.dir.clone());
           if (killed) { /* handled in updateEnemies */ }
           audio.hit();
@@ -679,9 +692,11 @@ function updateMissiles(dt) {
     // Proximity fuze: the missile flags itself, we resolve the blast here so
     // splash can catch a target the warhead didn't directly contact.
     if (m.detonated) {
+      vfx.explode(m.position.clone(), 1.9, 3, m.dir.clone().multiplyScalar(m.speed * 0.25));
       particles.explosion(m.position.clone(), 1.2);
       audio.explosion();
-      player.addTrauma(0.25);
+      const nd = 1 - Math.min(1, m.position.distanceTo(player.position) / 500);
+      player.addTrauma(0.12 + nd * 0.4);
       const victims = m.owner === 'player' ? game.enemies : [player];
       for (const v of victims) {
         if (!v.alive) continue;
@@ -758,6 +773,15 @@ function animate() {
 /** One tick of gameplay. Split out of animate() so it can be stepped
  *  independently of requestAnimationFrame when profiling or debugging. */
 function stepGame(dt) {
+  // Effects advance regardless of game state. They used to sit inside the
+  // "playing" guard, which froze every explosion, debris chunk and smoke puff
+  // the instant the player died — including the player's OWN death explosion,
+  // which is the one moment the effect most needs to play out.
+  if (assetsReady) {
+    if (particles) particles.update(dt);
+    if (vfx) vfx.update(dt, particles);
+  }
+
   if (game.state === 'playing' && assetsReady && player) {
     player.update(dt, game.time);
 
@@ -772,7 +796,6 @@ function stepGame(dt) {
     updateBullets(dt);
     updateMissiles(dt);
     updateFlares(dt);
-    particles.update(dt);
 
     // Spawning
     if (game.waveActive && game.spawnQueue.length > 0) {
@@ -790,6 +813,7 @@ function stepGame(dt) {
 
     // Player death
     if (!player.alive) {
+      vfx.explode(player.position.clone(), 4.2, 12, player.velocity);
       particles.explosion(player.position.clone(), 2.0);
       audio.explosion();
       audio.gameOver();
@@ -946,6 +970,7 @@ hud.resizeTactical(window.innerWidth, window.innerHeight);
   try {
     world = createWorld(scene);
     particles = new ParticleField(scene, 1200);
+    vfx = new VFX(scene);
     player = new Player(camera, input);
     // Wire player weapon hooks (must happen after the Player exists).
     player.onFireGun = firePlayerGun;
@@ -972,6 +997,7 @@ hud.resizeTactical(window.innerWidth, window.innerHeight);
     if (import.meta.env.DEV) {
       window.__sky = {
         THREE, renderer, scene, camera, game, world, player, targeting, hud,
+        vfx, particles,
         // Mirrors animate()'s ordering exactly — including input.update(),
         // without which a test silently bypasses the whole mouse pipeline
         // (virtual stick, recentring, smoothing) and cannot see input bugs.

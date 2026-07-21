@@ -153,6 +153,36 @@ blender\build_all.bat
 | Enemy jet | `blender/build_enemy_jet.py` | `blender/enemy_jet.blend` | `public/assets/models/enemy_jet.glb` |
 | Helicopter | `blender/build_helicopter.py` | `blender/helicopter.blend` | `public/assets/models/helicopter.glb` |
 | Missile / Tree / Rock / Cloud | `blender/build_props.py` | `blender/*.blend` | `public/assets/models/*.glb` |
+| Explosion / Debris / Muzzle flash | `blender/build_vfx.py` | `blender/vfx_*.blend` | `public/assets/models/vfx_*.glb` |
+
+---
+
+## 💥 VFX — destruction, fire and gunfire
+
+Built in Blender by `blender/build_vfx.py` and driven at runtime by `src/vfx.js`.
+
+**Blender authors the forms; the runtime animates them.** Baking the motion into the assets — a simulated fireball flipbook, keyframed debris — would cost megabytes and still play back identically on every kill. Driving simple forms in code costs nothing and gives every explosion its own debris directions, spin and timing.
+
+| Asset | Triangles | Contents |
+|---|---|---|
+| `vfx_explosion.glb` | 580 | 3 nested fire shells, a shockwave ring, 5 smoke blobs |
+| `vfx_debris.glb` | 194 | 10 chunks: torn panels, structural pieces with spars, an engine section |
+| `vfx_muzzle.glb` | 25 | 7-point flash star + propellant cone |
+
+These are **deliberately low poly**, the one exception to the 90k budget. You fly behind the player jet for the whole game, so it earns its polygons; a single kill instead puts an explosion, a shockwave, eight debris chunks and a dozen smoke puffs on screen in one frame, each alive for a second or two. Spending 90k on any of them would cost frames exactly when the most is happening.
+
+What makes it read as an explosion rather than an expanding orange ball:
+
+- **Three shells, not one.** The runtime expands and fades them at staggered rates (`lag = idx * 0.10`), so the core burns out while the outer shell balloons into smoke — the blast reads as a volume.
+- **Fire cools as it expands.** Each shell ramps white-hot → orange → soot (`FIRE_HOT`/`FIRE_MID`/`FIRE_LOW`) instead of just dropping opacity.
+- **Expansion eases off.** `1 - (1-k)^2.6` — real blasts decelerate hard as they entrain air; linear growth looks like an inflating balloon.
+- **The shockwave outruns the fireball** and dies at 2.4× the rate, which is the cue that something *detonated*.
+- **Debris inherits the victim's velocity** (`vel.addScaledVector(inherit, 0.55)`), so wreckage reads as coming *off* an aircraft rather than being emitted by a point. It falls under the same gravity as the flight model, trails thinning smoke, and despawns on ground contact.
+- **Muzzle flashes are randomly rolled** about the barrel axis and last 60 ms, so sustained fire never strobes an identical shape.
+
+Everything is **pooled** (`Pool` in `src/vfx.js`) — fresh geometry and materials per kill would allocate during the busiest moment of the game and churn GPU memory as wreckage expired. Measured over 8 rounds of 12 simultaneous kills, the pools settle at 3 explosions / 34 debris / 8 flashes and stop growing.
+
+Effects update **outside** the `state === 'playing'` guard, so the player's own death explosion plays out instead of freezing on its first frame.
 
 ---
 
@@ -172,7 +202,8 @@ jet-game/
 │   ├── world.js            # Procedural environment: terrain, ocean, islands, sky
 │   ├── player.js           # Player flight physics + chase camera
 │   ├── enemies.js          # Enemy AI (jet/helo), bullets, homing missiles, trails
-│   ├── particles.js        # GPU particle system: explosions, smoke, sparks
+│   ├── particles.js        # GPU particle system: smoke, sparks, trails
+│   ├── vfx.js              # Pooled Blender VFX: fireballs, debris, muzzle flashes
 │   ├── input.js            # Keyboard + mouse with pointer lock
 │   ├── audio.js            # Procedural Web Audio SFX + engine drone
 │   ├── hud.js              # HUD: bars, score, radar canvas
@@ -183,6 +214,7 @@ jet-game/
 │   ├── build_enemy_jet.py
 │   ├── build_helicopter.py
 │   ├── build_props.py      # Missile, tree, rock, cloud
+│   ├── build_vfx.py        # Explosion, debris, muzzle flash
 │   ├── build_all.bat       # Rebuild every .glb headlessly
 │   └── *.blend             # Editable Blender source files
 └── public/                 # Served verbatim; copied to dist/ on build
@@ -194,7 +226,10 @@ jet-game/
             ├── missile.glb
             ├── tree.glb
             ├── rock.glb
-            └── cloud.glb
+            ├── cloud.glb
+            ├── vfx_explosion.glb
+            ├── vfx_debris.glb
+            └── vfx_muzzle.glb
 ```
 
 Three.js is installed from npm (`three`) and bundled by Vite. The `.glb` models live in `public/`, so Vite serves them as-is in dev and copies them into `dist/` on build.

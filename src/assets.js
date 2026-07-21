@@ -28,6 +28,9 @@ const ASSETS = {
   tree: 'tree.glb',
   rock: 'rock.glb',
   cloud: 'cloud.glb',
+  vfxExplosion: 'vfx_explosion.glb',
+  vfxDebris: 'vfx_debris.glb',
+  vfxMuzzle: 'vfx_muzzle.glb',
 };
 
 // Track loading progress for UI

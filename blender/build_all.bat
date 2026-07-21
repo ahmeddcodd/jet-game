@@ -22,6 +22,10 @@ echo === Building props (missile, tree, rock, cloud) ===
 %BLENDER% --background --python "%HERE%build_props.py"
 
 echo.
-echo === DONE. GLB files in assets\models\ ===
-dir /b "%HERE%..\assets\models\*.glb"
+echo === Building VFX (explosion, debris, muzzle flash) ===
+%BLENDER% --background --python "%HERE%build_vfx.py"
+
+echo.
+echo === DONE. GLB files in public\assets\models\ ===
+dir /b "%HERE%..\public\assets\models\*.glb"
 endlocal
