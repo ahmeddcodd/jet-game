@@ -50,7 +50,9 @@ export const FLIGHT = {
      These terms sit on top of the physics rather than replacing it — the jet
      still bleeds speed in a turn and still can't out-pull its wing, it just
      stops punishing you for not flying it like a simulator.                */
-  assistCoord: 0.80,    // bank alone pulls into the turn (coordinated-turn assist)
+  // Gain on the coordinated turn rate. 1.0 would be the literal g·tan(φ)/V
+  // relation; above that trades some realism for arcade responsiveness.
+  assistCoord: 1.45,
   assistYaw: 0.30,      // small rudder cross-feed for a tidy nose
   lowSpeedFloor: 0.22,  // floor under low-speed G so slow flight stays steerable
   pitchBoost: 1.30,     // overall pitch responsiveness
@@ -381,24 +383,17 @@ export class Player {
     // the mouse ends with the aircraft locked inverted.
     const bankAngle = Math.atan2(leftWingY, upY);   // +ve = banked screen-right
 
-    // Coordinated-turn assist. This is the key to "point and go": banking on
-    // its own pulls the nose around, the way a pilot feeds in back-pressure
-    // through a turn. Without it, mouse X only rolled the jet — and because
-    // yaw is a body axis, once rolled it stopped being a heading change at all,
-    // so the jet banked beautifully and flew straight on.
-    const coord = !man && upY > 0.2
-      ? Math.abs(clamp(leftWingY, -1, 1)) * FLIGHT.assistCoord
-      : 0;
-
-    // Commanded G: player pull plus the coordinated component.
-    const pullIn = clamp01(Math.abs(my) + coord);
-    const cmdG = pullIn * availG;
+    // Commanded G comes from the stick alone. The coordinated turn used to be
+    // folded in here as extra body pitch, which is what made steering climb:
+    // a body-frame pull at bank angle φ splits into sin(φ) of horizontal turn
+    // and cos(φ) of *vertical*, and because gravity in this model only bleeds
+    // speed along the flight path (it never curves the trajectory), nothing
+    // absorbed that vertical component. Banking therefore pitched the nose up.
+    // The turn is now applied about the world vertical instead — see below.
+    const cmdG = Math.abs(my) * availG;
     this.gLoad = damp(this.gLoad, 1 + cmdG, 7, dt);
 
-    // Pitch always pulls toward the aircraft's "up" when the assist is driving
-    // it; explicit stick input still wins its own direction.
-    const pitchSign = Math.abs(my) > 0.05 ? -Math.sign(my) : -1;
-    const pitchRate = pitchSign *
+    const pitchRate = -Math.sign(my) *
       (cmdG * FLIGHT.gravity * FLIGHT.pitchBoost) / Math.max(this.speed, 24);
 
     // Roll: free rate under A/D or during a scripted maneuver, otherwise the
@@ -418,7 +413,9 @@ export class Player {
       rollRate = clamp((bankWant - bankAngle) * FLIGHT.bankGain,
                        -FLIGHT.rollRate, FLIGHT.rollRate) * authority;
     }
-    const yawRate = (-mx * FLIGHT.assistYaw + yawIn * 0.6) * FLIGHT.rudderRate * authority;
+    // Rudder only — the old mouse-X cross-feed here yawed in the BODY frame,
+    // which while banked is partly vertical too and blurred the steering.
+    const yawRate = yawIn * 0.6 * FLIGHT.rudderRate * authority;
 
     const resp = 8.5;
     this.pitch = damp(this.pitch, pitchRate, resp, dt);
@@ -429,6 +426,25 @@ export class Player {
     _e1.set(this.pitch * dt, this.yaw * dt, this.roll * dt, 'YXZ');
     _dq.setFromEuler(_e1);
     this.mesh.quaternion.multiply(_dq).normalize();
+
+    // ---- Coordinated turn ----------------------------------------------
+    // Banking steers the jet, applied as a rotation about the WORLD vertical so
+    // the turn is exactly horizontal — no altitude drift, which is what makes
+    // it feel accurate. Rate is the real level-turn relation, ω = g·tan(φ)/V,
+    // so a steeper bank turns harder and a faster jet turns wider, and rolling
+    // out to wings-level ends the turn precisely.
+    //
+    // Sign: a positive rotation about world +Y carries the nose toward world
+    // +X, which is screen LEFT (see the handedness note above), so a right bank
+    // needs a negative rotation.
+    if (!man && upY > 0.2) {
+      const phi = clamp(bankAngle, -1.30, 1.30);      // cap so tan() stays sane
+      const turn = (FLIGHT.gravity * Math.tan(phi)) / Math.max(this.speed, 45);
+      if (Math.abs(turn) > 1e-5) {
+        _dq.setFromAxisAngle(UP, -turn * FLIGHT.assistCoord * dt);
+        this.mesh.quaternion.premultiply(_dq).normalize();
+      }
+    }
 
     const fwd = this.forward;
 
